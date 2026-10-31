@@ -15,7 +15,7 @@ public interface RsPaintExtendedConfig extends Config
 	@ConfigItem(
 		keyName = "drawKeybind",
 		name = "Draw keybind",
-		description = "Hold this key and click and drag to draw."
+		description = "Press this key to turn draw mode on or off. In draw mode, click and drag to draw."
 	)
 	default Keybind drawKeybind()
 	{
@@ -25,7 +25,7 @@ public interface RsPaintExtendedConfig extends Config
 	@ConfigItem(
 		keyName = "eraseKeybind",
 		name = "Erase keybind",
-		description = "Hold this key and click and drag to erase."
+		description = "Press this key to turn erase mode on or off. In erase mode, click and drag to erase."
 	)
 	default Keybind eraseKeybind()
 	{
