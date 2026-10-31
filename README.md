@@ -1,4 +1,8 @@
-# rspaint
-Hold the hotkey (default `ctrl-b`) and click and drag the mouse to doodle on the ground. Hold `ctrl-e` to erase.
+# RsPaint Extended
+RsPaint Extended lets you draw on the ground in RuneLite.
 
-Change colors by clicking the menu on the left side of the screen.
+To draw, hold the draw key (default `ctrl-b`). Then click and drag the mouse.
+
+To erase, hold the erase key (default `ctrl-e`). Then click and drag the mouse over a line.
+
+To change the color, use the color buttons on the left side of the screen. The buttons show only while you hold the draw key or the erase key.

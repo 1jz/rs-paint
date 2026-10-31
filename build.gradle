@@ -23,7 +23,7 @@ dependencies {
 	testImplementation group: 'net.runelite', name:'jshell', version: runeLiteVersion
 }
 
-group = 'com.rspaint'
+group = 'com.rspaintextended'
 version = '1.0.2'
 
 tasks.withType(JavaCompile) {

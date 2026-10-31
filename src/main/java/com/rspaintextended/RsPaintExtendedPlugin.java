@@ -1,4 +1,4 @@
-package com.rspaint;
+package com.rspaintextended;
 
 import com.google.inject.Provides;
 import java.awt.Color;
@@ -23,39 +23,39 @@ import net.runelite.client.ui.overlay.OverlayManager;
 
 @Slf4j
 @PluginDescriptor(
-	name = "RsPaint",
-	description = "draw on the floor",
+	name = "RsPaint Extended",
+	description = "Draw on the ground.",
 	tags = {"paint", "draw", "ground", "marker", "tile", "color", "art"}
 )
-public class RsPaintPlugin extends Plugin
+public class RsPaintExtendedPlugin extends Plugin
 {
 	@Inject Client client;
-	@Provides RsPaintConfig provideConfig(ConfigManager configManager) { return configManager.getConfig(RsPaintConfig.class); }
-	@Inject RsPaintConfig config;
+	@Provides RsPaintExtendedConfig provideConfig(ConfigManager configManager) { return configManager.getConfig(RsPaintExtendedConfig.class); }
+	@Inject RsPaintExtendedConfig config;
 	@Inject KeyManager keyManager;
 	@Inject MouseManager mouseManager;
-	@Inject BGMIOverlay bgmiOverlay;
+	@Inject RsPaintExtendedOverlay overlay;
 	@Inject EventBus eventBus;
 	@Inject OverlayManager overlayManager;
 
 	@Override
 	protected void startUp() throws Exception
 	{
-		bgmiOverlay.startUp();
-		overlayManager.add(bgmiOverlay);
-		mouseManager.registerMouseListener(bgmiOverlay);
-		keyManager.registerKeyListener(bgmiOverlay);
-		eventBus.register(bgmiOverlay);
+		overlay.startUp();
+		overlayManager.add(overlay);
+		mouseManager.registerMouseListener(overlay);
+		keyManager.registerKeyListener(overlay);
+		eventBus.register(overlay);
 	}
 
 	@Override
 	protected void shutDown() throws Exception
 	{
-		overlayManager.remove(bgmiOverlay);
-		mouseManager.unregisterMouseListener(bgmiOverlay);
-		keyManager.unregisterKeyListener(bgmiOverlay);
-		eventBus.unregister(bgmiOverlay);
-		overlayManager.remove(bgmiOverlay);
+		overlayManager.remove(overlay);
+		mouseManager.unregisterMouseListener(overlay);
+		keyManager.unregisterKeyListener(overlay);
+		eventBus.unregister(overlay);
+		overlayManager.remove(overlay);
 	}
 
 	@Subscribe

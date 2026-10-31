@@ -1,4 +1,4 @@
-package com.rspaint;
+package com.rspaintextended;
 
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
@@ -7,9 +7,11 @@ import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.Keybind;
 
-@ConfigGroup("rspaint")
-public interface RsPaintConfig extends Config
+@ConfigGroup(RsPaintExtendedConfig.GROUP)
+public interface RsPaintExtendedConfig extends Config
 {
+	String GROUP = "rspaintextended";
+
 	@ConfigItem(
 		keyName = "drawKeybind",
 		name = "Draw keybind",

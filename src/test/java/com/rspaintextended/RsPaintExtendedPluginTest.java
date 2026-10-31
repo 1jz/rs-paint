@@ -1,4 +1,4 @@
-package com.rspaint;
+package com.rspaintextended;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -8,13 +8,13 @@ import net.runelite.client.RuneLite;
 import net.runelite.client.RuneLiteProperties;
 import net.runelite.client.externalplugins.ExternalPluginManager;
 
-public class ExamplePluginTest
+public class RsPaintExtendedPluginTest
 {
 	public static void main(String[] args) throws Exception
 	{
-		setWindowTitle("rspaint (" + getCurrentGitBranch() + ") RL-" + RuneLiteProperties.getVersion());
+		setWindowTitle("RsPaint Extended (" + getCurrentGitBranch() + ") RL-" + RuneLiteProperties.getVersion());
 
-		ExternalPluginManager.loadBuiltin(RsPaintPlugin.class);
+		ExternalPluginManager.loadBuiltin(RsPaintExtendedPlugin.class);
 		RuneLite.main(args);
 	}
 

@@ -1,9 +1,9 @@
-package com.rspaint;
+package com.rspaintextended;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
-import com.rspaint.RsPaintPlugin.Stroke;
-import com.rspaint.RsPaintPlugin.StrokePoint;
+import com.rspaintextended.RsPaintExtendedPlugin.Stroke;
+import com.rspaintextended.RsPaintExtendedPlugin.StrokePoint;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
@@ -49,11 +49,11 @@ import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.util.ColorUtil;
 
-public class BGMIOverlay extends Overlay implements MouseListener, KeyListener
+public class RsPaintExtendedOverlay extends Overlay implements MouseListener, KeyListener
 {
 	@Inject Client client;
-	@Inject RsPaintPlugin plugin;
-	@Inject private RsPaintConfig config;
+	@Inject RsPaintExtendedPlugin plugin;
+	@Inject private RsPaintExtendedConfig config;
 	@Inject private ConfigManager configManager;
 	@Inject private Gson gson;
 	@Inject private ColorPickerManager colorPickerManager;
@@ -63,7 +63,7 @@ public class BGMIOverlay extends Overlay implements MouseListener, KeyListener
 	static pf pf(Point p) { return new pf(p.getX(), p.getY()); }
 
 	@Inject
-	public BGMIOverlay()
+	public RsPaintExtendedOverlay()
 	{
 		setPosition(OverlayPosition.DYNAMIC);
 		setPriority(Overlay.PRIORITY_LOW);
@@ -285,7 +285,7 @@ public class BGMIOverlay extends Overlay implements MouseListener, KeyListener
 
 	private void saveColors()
 	{
-		configManager.setConfiguration("rspaint", "drawColors", gson.toJson(colors));
+		configManager.setConfiguration(RsPaintExtendedConfig.GROUP, "drawColors", gson.toJson(colors));
 	}
 
 	@Subscribe public void onClientTick(ClientTick e) {
@@ -400,7 +400,7 @@ public class BGMIOverlay extends Overlay implements MouseListener, KeyListener
 		regionsToUnload.removeAll(loadedRegions);
 		for (Integer region : regionsToLoad)
 		{
-			String conf = configManager.getConfiguration("rspaint", "strokes_" + region);
+			String conf = configManager.getConfiguration(RsPaintExtendedConfig.GROUP, "strokes_" + region);
 			List<Stroke> strokes = conf == null ? new ArrayList<>() : gson.fromJson(conf, new TypeToken<List<Stroke>>() {}.getType());
 			strokesByRegion.put(region, strokes);
 		}
@@ -409,7 +409,7 @@ public class BGMIOverlay extends Overlay implements MouseListener, KeyListener
 	void saveStrokes(int regionId) {
 		List<Stroke> strokes = strokesByRegion.get(regionId);
 		if (strokes == null) return;
-		configManager.setConfiguration("rspaint", "strokes_" + regionId, gson.toJson(strokes));
+		configManager.setConfiguration(RsPaintExtendedConfig.GROUP, "strokes_" + regionId, gson.toJson(strokes));
 	}
 
 	private void drawStrokes(Graphics2D graphics)
@@ -648,7 +648,7 @@ public class BGMIOverlay extends Overlay implements MouseListener, KeyListener
 	@Override public MouseEvent mouseMoved(MouseEvent e) { return e; }
 
 	public void startUp() {
-		String configuration = configManager.getConfiguration("rspaint", "drawColors");
+		String configuration = configManager.getConfiguration(RsPaintExtendedConfig.GROUP, "drawColors");
 		if (configuration != null)
 		{
 			List<Color> colorsFromConfig = gson.fromJson(configuration, new TypeToken<List<Color>>() {}.getType());
