@@ -4,8 +4,10 @@ import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import com.rspaintextended.RsPaintExtendedPlugin.Stroke;
 import com.rspaintextended.RsPaintExtendedPlugin.StrokePoint;
+import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
+import java.awt.Composite;
 import java.awt.Dimension;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
@@ -577,12 +579,20 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 			return;
 		}
 
-		// Turn on antialiasing only for the strokes, and restore the old state, so the toolbar stays sharp.
+		// Turn on antialiasing and transparency only for the strokes, and restore the old state, so the toolbar stays sharp.
 		Object oldAntialiasing = graphics.getRenderingHint(RenderingHints.KEY_ANTIALIASING);
 		Object oldStrokeControl = graphics.getRenderingHint(RenderingHints.KEY_STROKE_CONTROL);
 		java.awt.Stroke oldStroke = graphics.getStroke();
+		Composite oldComposite = graphics.getComposite();
 		try
 		{
+			if (config.transparentStrokes())
+			{
+				// Each stroke is one path that is drawn one time, so the parts of a stroke that cross do not get darker.
+				// Each new stroke is drawn over the older strokes, so the colors of different strokes mix.
+				float opacity = Math.max(0f, Math.min(1f, config.strokeOpacity() / 100f));
+				graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, opacity));
+			}
 			if (config.antialiasing())
 			{
 				graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -606,6 +616,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 				graphics.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, oldStrokeControl);
 			}
 			graphics.setStroke(oldStroke);
+			graphics.setComposite(oldComposite);
 		}
 	}
 

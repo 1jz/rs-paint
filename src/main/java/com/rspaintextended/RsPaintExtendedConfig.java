@@ -7,6 +7,8 @@ import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Keybind;
+import net.runelite.client.config.Range;
+import net.runelite.client.config.Units;
 
 @ConfigGroup(RsPaintExtendedConfig.GROUP)
 public interface RsPaintExtendedConfig extends Config
@@ -62,5 +64,31 @@ public interface RsPaintExtendedConfig extends Config
 	default LineStyle lineStyle()
 	{
 		return LineStyle.SMOOTH;
+	}
+
+	@ConfigItem(
+		keyName = "transparentStrokes",
+		name = "Transparent strokes",
+		description = "Lets the game show through strokes. Where a stroke crosses itself, it does not get darker. Where a stroke crosses an older stroke, the colors mix.",
+		section = renderingSection,
+		position = 2
+	)
+	default boolean transparentStrokes()
+	{
+		return true;
+	}
+
+	@Range(min = 10, max = 100)
+	@Units(Units.PERCENT)
+	@ConfigItem(
+		keyName = "strokeOpacity",
+		name = "Stroke opacity",
+		description = "How much a stroke hides the game under it, if Transparent strokes is on. At 100%, the stroke hides the game fully.",
+		section = renderingSection,
+		position = 3
+	)
+	default int strokeOpacity()
+	{
+		return 75;
 	}
 }
