@@ -5,14 +5,18 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
 import com.rspaintextended.RsPaintExtendedPlugin.StrokePoint;
+import java.awt.geom.Line2D;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Deque;
 import java.util.List;
 
 /**
  * Writes the points of a stroke as one short string, for party messages and drawing files.
+ * Also removes the points of a complete stroke that do not change its shape.
  *
  * <p>Each position is rounded to 1/128 of a tile, which is one local unit. The first point is stored as its full
  * position, and each other point as the change from the point before it. Consecutive points are near each other,
@@ -22,6 +26,10 @@ import java.util.List;
 final class StrokeCodec
 {
 	static final int UNITS_PER_TILE = 128;
+
+	// Simplify removes a point if it is at most this many local units from the line between the kept points around it.
+	// 2 units is 1/64 of a tile: about half a pixel at the default zoom, and about 2 pixels at full zoom.
+	private static final double SIMPLIFY_TOLERANCE = 2;
 
 	// A change has at most 5 varint bytes. That is more than the int range of a position needs.
 	private static final int MAX_VARINT_BYTES = 5;
@@ -45,6 +53,71 @@ final class StrokeCodec
 			lastY = y;
 		}
 		return Base64.getUrlEncoder().withoutPadding().encodeToString(out.toByteArray());
+	}
+
+	/**
+	 * Returns the points without the ones that are nearly on the line between their neighbors (Ramer-Douglas-Peucker).
+	 * The kept points are rounded to 1/128 tile, as encode rounds them, so you and your party have the same points.
+	 */
+	static List<StrokePoint> simplify(List<StrokePoint> points)
+	{
+		int n = points.size();
+		long[] xs = new long[n];
+		long[] ys = new long[n];
+		for (int i = 0; i < n; i++)
+		{
+			StrokePoint point = points.get(i);
+			xs[i] = toUnits(point.getX(), point.getSubx());
+			ys[i] = toUnits(point.getY(), point.getSuby());
+		}
+
+		boolean[] keep = new boolean[n];
+		if (n > 0)
+		{
+			keep[0] = true;
+			keep[n - 1] = true;
+		}
+
+		// A stack of index ranges, not recursion, so a very long stroke cannot overflow the call stack.
+		double toleranceSq = SIMPLIFY_TOLERANCE * SIMPLIFY_TOLERANCE;
+		Deque<int[]> ranges = new ArrayDeque<>();
+		if (n > 2)
+		{
+			ranges.push(new int[]{0, n - 1});
+		}
+		while (!ranges.isEmpty())
+		{
+			int[] range = ranges.pop();
+			int first = range[0];
+			int last = range[1];
+			int farthest = -1;
+			double farthestSq = toleranceSq;
+			for (int i = first + 1; i < last; i++)
+			{
+				double distanceSq = Line2D.ptSegDistSq(xs[first], ys[first], xs[last], ys[last], xs[i], ys[i]);
+				if (distanceSq > farthestSq)
+				{
+					farthestSq = distanceSq;
+					farthest = i;
+				}
+			}
+			if (farthest != -1)
+			{
+				keep[farthest] = true;
+				ranges.push(new int[]{first, farthest});
+				ranges.push(new int[]{farthest, last});
+			}
+		}
+
+		List<StrokePoint> result = new ArrayList<>();
+		for (int i = 0; i < n; i++)
+		{
+			if (keep[i])
+			{
+				result.add(fromUnits(xs[i], ys[i]));
+			}
+		}
+		return result;
 	}
 
 	/** Returns the points, or null if the string is not a valid encoding. */

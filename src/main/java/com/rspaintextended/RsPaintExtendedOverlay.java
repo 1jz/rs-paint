@@ -151,6 +151,11 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 				addPoint(skippedPoint);
 			}
 		}
+		if (currentStroke != null)
+		{
+			// The stroke is complete. Fewer points make full syncs, exports and drawing faster.
+			currentStroke.pts = StrokeCodec.simplify(currentStroke.pts);
+		}
 		currentStroke = null;
 		skippedPoint = null;
 	}
@@ -711,7 +716,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 			stroke.color = new Color(synced.getColor(), true);
 			stroke.strokeWidth = synced.getStrokeWidth();
 			stroke.order = clock.next();
-			stroke.pts.addAll(synced.getPoints());
+			stroke.pts.addAll(StrokeCodec.simplify(synced.getPoints()));
 			strokesByRegion.computeIfAbsent(stroke.primaryRegion(), k -> new ArrayList<>()).add(stroke);
 		}
 		partySync.requestFullSync();

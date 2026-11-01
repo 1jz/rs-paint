@@ -45,8 +45,8 @@ public class PartyCanvasSync
 	// A full sync sends only the newest strokes, so that a big canvas does not flood the party.
 	// Older strokes stay on your screen, but party members lose them on the next full sync.
 	// A stroke gets at most one point each frame, so a line drawn in 1 second at 50 FPS has about 50 points.
-	// At 50 points for each stroke, 1000 strokes are about 210 KB in about 7 messages, all sent in one flush.
-	// At 200 points for each stroke, they are about 610 KB in about 19 messages.
+	// StrokeCodec.simplify keeps about 25 of them. Then 1000 strokes are about 150 KB in about 5 messages, all sent in one flush.
+	// A line of 200 points keeps about 100, and 1000 of those are about 390 KB in about 12 messages.
 	private static final int MAX_SYNCED_STROKES = 1000;
 
 	@Inject private ClientThread clientThread;
