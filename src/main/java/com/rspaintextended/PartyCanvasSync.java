@@ -38,6 +38,7 @@ public class PartyCanvasSync
 	@Inject private ClientThread clientThread;
 	@Inject private PartyService partyService;
 	@Inject private WSClient wsClient;
+	@Inject private StrokeClock clock;
 
 	// Client thread only.
 	private final Map<Long, MemberCanvas> canvases = new HashMap<>();
@@ -238,6 +239,8 @@ public class PartyCanvasSync
 			fullSyncPending = false;
 			List<Stroke> strokes = new ArrayList<>();
 			localStrokesByRegion.values().forEach(strokes::addAll);
+			// Receivers sort by the order in each stroke. Old versions of the plugin use the message order.
+			strokes.sort(Stroke.DRAW_ORDER);
 			sendFullSync(strokes);
 		}
 
@@ -292,7 +295,7 @@ public class PartyCanvasSync
 
 	static SyncedStroke toSynced(Stroke stroke, List<StrokePoint> points)
 	{
-		return new SyncedStroke(stroke.id, stroke.color.getRGB(), stroke.strokeWidth, new ArrayList<>(points));
+		return new SyncedStroke(stroke.id, stroke.color.getRGB(), stroke.strokeWidth, stroke.order, new ArrayList<>(points));
 	}
 
 	private boolean canSend()
@@ -433,7 +436,7 @@ public class PartyCanvasSync
 		hiddenMembers.clear();
 	}
 
-	private static class MemberCanvas
+	private class MemberCanvas
 	{
 		final Map<Integer, List<Stroke>> strokesByRegion = new HashMap<>();
 		final Map<String, Stroke> strokesById = new HashMap<>();
@@ -488,6 +491,7 @@ public class PartyCanvasSync
 			stroke.color = new Color(synced.getColor(), true);
 			// Do not trust the width from the message. A very large width is slow to draw.
 			stroke.strokeWidth = Stroke.validWidth(synced.getStrokeWidth());
+			stroke.order = clock.receive(synced.getOrder());
 			stroke.pts.addAll(synced.getPoints());
 
 			strokesById.put(stroke.id, stroke);

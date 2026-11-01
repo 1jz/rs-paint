@@ -60,6 +60,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 	@Inject private Gson gson;
 	@Inject private ColorPickerManager colorPickerManager;
 	@Inject private PartyCanvasSync partySync;
+	@Inject private StrokeClock clock;
 
 	@Getter @Setter private volatile boolean showOwnStrokes = true;
 
@@ -276,6 +277,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 						currentStroke = new Stroke();
 						currentStroke.color = selectedColor();
 						currentStroke.strokeWidth = strokeSize;
+						currentStroke.order = clock.next();
 						strokesByRegion.computeIfAbsent(new WorldPoint(tilex, tiley, 0).getRegionID(), k -> new ArrayList<>()).add(currentStroke);
 						addPoint(point);
 					} else if (isFarFromLastPoint(ground)) {
@@ -544,7 +546,10 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		return result;
 	}
 
-	/** Adds the strokes to the local player's canvas with new ids, and sends them to the party. Client thread only. */
+	/**
+	 * Adds the strokes to the local player's canvas with new ids, and sends them to the party. Client thread only.
+	 * The strokes draw over all existing strokes, in the order of the list.
+	 */
 	void importStrokes(List<SyncedStroke> strokes)
 	{
 		for (SyncedStroke synced : strokes)
@@ -556,6 +561,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 			Stroke stroke = new Stroke();
 			stroke.color = new Color(synced.getColor(), true);
 			stroke.strokeWidth = synced.getStrokeWidth();
+			stroke.order = clock.next();
 			stroke.pts.addAll(synced.getPoints());
 			strokesByRegion.computeIfAbsent(stroke.primaryRegion(), k -> new ArrayList<>()).add(stroke);
 		}
@@ -603,9 +609,52 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		}
 	}
 
+	// The strokes to draw in this frame. Reused, so drawing does not make a new list on each frame.
+	private final List<Stroke> visibleStrokes = new ArrayList<>();
+
 	private void drawStrokes(Graphics2D graphics, WorldView worldView, int[] regions, int mx, int my, LineStyle style)
 	{
-		pf eraseAt = erasing ? pf(mx, my) : null;
+		if (erasing)
+		{
+			eraseOwnStrokes(worldView, regions, pf(mx, my), style);
+		}
+
+		for (int region : regions)
+		{
+			List<Stroke> strokes = strokesByRegion.get(region);
+			if (strokes == null)
+			{
+				continue;
+			}
+			for (Stroke s : strokes)
+			{
+				if (showOwnStrokes || s == currentStroke)
+				{
+					visibleStrokes.add(s);
+				}
+			}
+		}
+		partySync.forEachVisibleStroke(regions, visibleStrokes::add);
+
+		// Draw the strokes of all players together, from the oldest to the newest, so that a new stroke is on top.
+		// The strokes are mostly in order already, so the sort is fast.
+		visibleStrokes.sort(Stroke.DRAW_ORDER);
+		try
+		{
+			for (Stroke s : visibleStrokes)
+			{
+				drawStroke(graphics, worldView, s, style);
+			}
+		}
+		finally
+		{
+			visibleStrokes.clear();
+		}
+	}
+
+	/** Removes the local player's shown strokes that are near the point, and tells party members. */
+	private void eraseOwnStrokes(WorldView worldView, int[] regions, pf eraseAt, LineStyle style)
+	{
 		for (int region : regions)
 		{
 			List<Stroke> strokes = strokesByRegion.get(region);
@@ -617,11 +666,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 			List<Stroke> toErase = null;
 			for (Stroke s : strokes)
 			{
-				if (!showOwnStrokes && s != currentStroke)
-				{
-					continue;
-				}
-				if (drawStroke(graphics, worldView, s, eraseAt, style))
+				if ((showOwnStrokes || s == currentStroke) && buildPath(worldView, s, eraseAt, style))
 				{
 					if (toErase == null)
 					{
@@ -631,13 +676,12 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 				}
 			}
 
-			if (toErase != null) {
+			if (toErase != null)
+			{
 				strokes.removeAll(toErase);
 				partySync.onStrokesErased(toErase);
 			}
 		}
-
-		partySync.forEachVisibleStroke(regions, s -> drawStroke(graphics, worldView, s, null, style));
 	}
 
 	private BasicStroke basicStroke = newBasicStroke(1f);
@@ -725,8 +769,16 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		}
 	}
 
-	/** Draws one stroke. If eraseAt is not null, returns true when the stroke is near that point. */
-	private boolean drawStroke(Graphics2D graphics, WorldView worldView, Stroke s, pf eraseAt, LineStyle style)
+	private void drawStroke(Graphics2D graphics, WorldView worldView, Stroke s, LineStyle style)
+	{
+		buildPath(worldView, s, null, style);
+		graphics.setColor(s.color);
+		graphics.setStroke(basicStroke(s.strokeWidth));
+		graphics.draw(path);
+	}
+
+	/** Puts the stroke with the current camera in path. If eraseAt is not null, returns true when the stroke is near that point. */
+	private boolean buildPath(WorldView worldView, Stroke s, pf eraseAt, LineStyle style)
 	{
 		boolean hit = false;
 		path.reset();
@@ -759,18 +811,17 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 			}
 			pf screen = projectToScreen(p.getSubx(), p.getSuby(), poly);
 			// The eraser has a radius of 10 pixels, so it hits a wide stroke at its edge.
-			if (eraseAt != null && !hit && runLength > 0
-				&& Line2D.ptSegDist(runX[runLength - 1], runY[runLength - 1], screen.x, screen.y, eraseAt.x, eraseAt.y) < 10 + s.strokeWidth / 2)
+			// The first point of a run has no line before it, so the test uses the point alone.
+			// Thus the eraser also hits a stroke that is one dot.
+			if (eraseAt != null && !hit)
 			{
-				hit = true;
+				float fromX = runLength > 0 ? runX[runLength - 1] : screen.x;
+				float fromY = runLength > 0 ? runY[runLength - 1] : screen.y;
+				hit = Line2D.ptSegDist(fromX, fromY, screen.x, screen.y, eraseAt.x, eraseAt.y) < 10 + s.strokeWidth / 2;
 			}
 			addToRun(screen.x, screen.y);
 		}
 		endRun(style);
-
-		graphics.setColor(s.color);
-		graphics.setStroke(basicStroke(s.strokeWidth));
-		graphics.draw(path);
 		return hit;
 	}
 

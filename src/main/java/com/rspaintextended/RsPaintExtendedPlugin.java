@@ -3,6 +3,7 @@ package com.rspaintextended;
 import com.google.inject.Provides;
 import java.awt.Color;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import javax.inject.Inject;
@@ -96,10 +97,15 @@ public class RsPaintExtendedPlugin extends Plugin
 			return width >= MIN_WIDTH && width <= MAX_WIDTH ? width : 1;
 		}
 
+		/** From the stroke that draws first, at the bottom, to the stroke that draws last, on top. */
+		static final Comparator<Stroke> DRAW_ORDER = Comparator.comparingLong((Stroke s) -> s.order).thenComparing(s -> s.id);
+
 		String id = UUID.randomUUID().toString();
 		List<StrokePoint> pts = new ArrayList<>();
 		Color color;
 		double strokeWidth;
+		// The draw order from StrokeClock.
+		long order;
 
 		public int primaryRegion()
 		{

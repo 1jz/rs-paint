@@ -15,7 +15,10 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.Value;
 
-/** Reads and writes drawing files. A drawing file is JSON that holds a list of strokes. */
+/**
+ * Reads and writes drawing files. A drawing file is JSON that holds a list of strokes.
+ * The list is in draw order: the first stroke draws first, at the bottom, and the last stroke draws on top.
+ */
 @Singleton
 class DrawingFiles
 {
@@ -33,15 +36,18 @@ class DrawingFiles
 		List<SyncedStroke> strokes;
 	}
 
+	/** Writes the strokes sorted in draw order. */
 	void write(File file, List<SyncedStroke> strokes) throws IOException
 	{
+		List<SyncedStroke> sorted = new ArrayList<>(strokes);
+		sorted.sort(SyncedStroke.DRAW_ORDER);
 		try (Writer writer = Files.newBufferedWriter(file.toPath(), StandardCharsets.UTF_8))
 		{
-			gson.toJson(new DrawingFile(FORMAT_VERSION, strokes), writer);
+			gson.toJson(new DrawingFile(FORMAT_VERSION, sorted), writer);
 		}
 	}
 
-	/** Returns the valid strokes in the file. Strokes without points are skipped. */
+	/** Returns the valid strokes in the file, in the order of the file. Strokes without points are skipped. */
 	List<SyncedStroke> read(File file) throws IOException
 	{
 		if (file.length() > MAX_FILE_BYTES)
@@ -101,7 +107,7 @@ class DrawingFiles
 		}
 
 		double width = RsPaintExtendedPlugin.Stroke.validWidth(stroke.getStrokeWidth());
-		return new SyncedStroke(stroke.getId(), stroke.getColor(), width, points);
+		return new SyncedStroke(stroke.getId(), stroke.getColor(), width, stroke.getOrder(), points);
 	}
 
 	private static float clamp01(float value)
