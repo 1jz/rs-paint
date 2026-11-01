@@ -160,8 +160,21 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 	List<Color> colors = new ArrayList<>();
 	int selectedColor = 0;
 
-	// The width of new strokes, in screen pixels.
+	// The stored width of new strokes. See screenWidth for the width on the screen.
 	int strokeSize = Stroke.MIN_WIDTH;
+
+	// If "Scale width with zoom" is on, a stroke has its stored width in screen pixels at this camera scale.
+	// 512 is the scale of the default zoom in fixed mode.
+	private static final float REFERENCE_SCALE = 512f;
+
+	// Multiplies the stored width of each stroke to get its width on the screen. Set at the start of each frame.
+	private float widthScale = 1f;
+
+	/** Returns the width on the screen of a stroke with this stored width. It is never less than 1 pixel. */
+	private float screenWidth(double width)
+	{
+		return Math.max(1f, (float) width * widthScale);
+	}
 
 	private void changeStrokeSize(int change)
 	{
@@ -225,6 +238,9 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
+		// The camera scale changes when the player zooms. The ground tiles on the screen get larger and smaller with it.
+		widthScale = config.scaleWidthWithZoom() && client.getScale() > 0 ? client.getScale() / REFERENCE_SCALE : 1f;
+
 		Point mouse = client.getMouseCanvasPosition();
 		int mx = mouse.getX();
 		int my = mouse.getY();
@@ -300,11 +316,12 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 					graphics.draw(new Ellipse2D.Float(mx - 10, my - 10, 20, 20));
 				} else if ((drawMode || drawing) && ground != null) {
 					graphics.setColor(selectedColor());
-					if (strokeSize <= 2) {
+					float size = screenWidth(strokeSize);
+					if (size <= 2) {
 						graphics.drawRect((int) ground.x - 1, (int) ground.y - 1, 2, 2);
 					} else {
-						// A circle with the size of the brush.
-						graphics.draw(new Ellipse2D.Float(ground.x - strokeSize / 2f, ground.y - strokeSize / 2f, strokeSize, strokeSize));
+						// A circle with the size of the brush on the screen.
+						graphics.draw(new Ellipse2D.Float(ground.x - size / 2, ground.y - size / 2, size, size));
 					}
 				}
 			}
@@ -784,7 +801,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 	{
 		buildPath(worldView, s, null, style);
 		graphics.setColor(s.color);
-		graphics.setStroke(basicStroke(s.strokeWidth));
+		graphics.setStroke(basicStroke(screenWidth(s.strokeWidth)));
 		graphics.draw(path);
 	}
 
@@ -828,7 +845,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 			{
 				float fromX = runLength > 0 ? runX[runLength - 1] : screen.x;
 				float fromY = runLength > 0 ? runY[runLength - 1] : screen.y;
-				hit = Line2D.ptSegDist(fromX, fromY, screen.x, screen.y, eraseAt.x, eraseAt.y) < 10 + s.strokeWidth / 2;
+				hit = Line2D.ptSegDist(fromX, fromY, screen.x, screen.y, eraseAt.x, eraseAt.y) < 10 + screenWidth(s.strokeWidth) / 2;
 			}
 			addToRun(screen.x, screen.y);
 		}

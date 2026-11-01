@@ -91,4 +91,16 @@ public interface RsPaintExtendedConfig extends Config
 	{
 		return 75;
 	}
+
+	@ConfigItem(
+		keyName = "scaleWidthWithZoom",
+		name = "Scale width with zoom",
+		description = "Makes strokes wider when you zoom in and thinner when you zoom out, so that they keep their size on the ground. The stroke size on the toolbar is the width at the default zoom in fixed mode.",
+		section = renderingSection,
+		position = 4
+	)
+	default boolean scaleWidthWithZoom()
+	{
+		return true;
+	}
 }

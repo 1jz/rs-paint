@@ -87,7 +87,7 @@ public class RsPaintExtendedPlugin extends Plugin
 	}
 
 	static class Stroke {
-		// The stroke width is in screen pixels, so it does not change with the zoom.
+		// The stored width is in screen pixels. If "Scale width with zoom" is on, the overlay changes it with the zoom.
 		static final int MIN_WIDTH = 1;
 		static final int MAX_WIDTH = 100;
 
