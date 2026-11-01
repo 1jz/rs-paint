@@ -86,6 +86,16 @@ public class RsPaintExtendedPlugin extends Plugin
 	}
 
 	static class Stroke {
+		// The stroke width is in screen pixels, so it does not change with the zoom.
+		static final int MIN_WIDTH = 1;
+		static final int MAX_WIDTH = 100;
+
+		/** Returns the width, or 1 if the width is not a number from MIN_WIDTH to MAX_WIDTH. */
+		static double validWidth(double width)
+		{
+			return width >= MIN_WIDTH && width <= MAX_WIDTH ? width : 1;
+		}
+
 		String id = UUID.randomUUID().toString();
 		List<StrokePoint> pts = new ArrayList<>();
 		Color color;

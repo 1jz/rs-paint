@@ -23,7 +23,6 @@ class DrawingFiles
 
 	private static final int FORMAT_VERSION = 1;
 	private static final long MAX_FILE_BYTES = 32L * 1024 * 1024;
-	private static final double MAX_STROKE_WIDTH = 20;
 
 	@Inject private Gson gson;
 
@@ -101,11 +100,7 @@ class DrawingFiles
 			return null;
 		}
 
-		double width = stroke.getStrokeWidth();
-		if (!(width > 0 && width <= MAX_STROKE_WIDTH))
-		{
-			width = 1;
-		}
+		double width = RsPaintExtendedPlugin.Stroke.validWidth(stroke.getStrokeWidth());
 		return new SyncedStroke(stroke.getId(), stroke.getColor(), width, points);
 	}
 

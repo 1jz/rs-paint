@@ -7,12 +7,15 @@ import com.rspaintextended.RsPaintExtendedPlugin.StrokePoint;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Polygon;
 import java.awt.Rectangle;
+import java.awt.RenderingHints;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Line2D;
+import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
@@ -101,8 +104,114 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 	final Map<Integer, List<Stroke>> strokesByRegion = new HashMap<>();
 	Stroke currentStroke = null;
 
+	// A new point is stored only when it is at least this many screen pixels from the last stored point.
+	// This removes the one-pixel steps of a slow mouse. It is a constant, not a setting,
+	// so that all clients store points with the same rule.
+	private static final float MIN_POINT_SPACING_PX = 3f;
+
+	// The newest point that was too near the last stored point. It is stored when the stroke ends,
+	// so the stroke ends where the mouse button was released.
+	private StrokePoint skippedPoint = null;
+
+	private void addPoint(StrokePoint point)
+	{
+		currentStroke.pts.add(point);
+		partySync.onPointAdded(currentStroke, point);
+		skippedPoint = null;
+	}
+
+	private boolean isFarFromLastPoint(pf ground)
+	{
+		List<StrokePoint> pts = currentStroke.pts;
+		if (pts.isEmpty())
+		{
+			return true;
+		}
+		// Project the last point with the current camera, so the spacing stays correct if the camera moves.
+		pf last = toScreen(client.getTopLevelWorldView(), pts.get(pts.size() - 1));
+		return last == null || last.distanceSq(ground) >= MIN_POINT_SPACING_PX * MIN_POINT_SPACING_PX;
+	}
+
+	private void finishStroke()
+	{
+		if (currentStroke != null && skippedPoint != null)
+		{
+			List<StrokePoint> pts = currentStroke.pts;
+			if (pts.isEmpty() || !pts.get(pts.size() - 1).equals(skippedPoint))
+			{
+				addPoint(skippedPoint);
+			}
+		}
+		currentStroke = null;
+		skippedPoint = null;
+	}
+
+	/** Returns the screen position of the point with the current camera, or null if its tile is not on the screen. */
+	private pf toScreen(WorldView worldView, StrokePoint p)
+	{
+		LocalPoint lp = LocalPoint.fromWorld(worldView, p.getX(), p.getY());
+		Polygon poly = lp != null ? Perspective.getCanvasTilePoly(client, lp) : null;
+		return poly != null ? projectToScreen(p.getSubx(), p.getSuby(), poly) : null;
+	}
+
 	List<Color> colors = new ArrayList<>();
 	int selectedColor = 0;
+
+	// The width of new strokes, in screen pixels.
+	int strokeSize = Stroke.MIN_WIDTH;
+
+	private void changeStrokeSize(int change)
+	{
+		strokeSize = Math.max(Stroke.MIN_WIDTH, Math.min(Stroke.MAX_WIDTH, strokeSize + change));
+		configManager.setConfiguration(RsPaintExtendedConfig.GROUP, "strokeSize", strokeSize);
+	}
+
+	// When the player holds down a stroke size button, the size starts to repeat after HOLD_DELAY_MS.
+	// Each repeat comes sooner than the one before it, until one repeat on each client tick.
+	private static final long HOLD_DELAY_MS = 400;
+	private static final long HOLD_FIRST_INTERVAL_MS = 80;
+	private static final long HOLD_MIN_INTERVAL_MS = 20;
+
+	// The held stroke size button and when the press started, or -1. Written on the AWT thread.
+	private volatile int heldSizeButton = -1;
+	private volatile long heldSince;
+	// Client thread only.
+	private long repeatPressStart;
+	private long nextRepeatAt;
+	private long repeatInterval;
+
+	private boolean isSizeButton(int index)
+	{
+		return index == SIZE_BUTTONS_START || index == SIZE_BUTTONS_START + 1;
+	}
+
+	private void repeatHeldSizeButton(int mx, int my)
+	{
+		int held = heldSizeButton;
+		if (held == -1)
+		{
+			return;
+		}
+
+		long pressStart = heldSince;
+		if (pressStart != repeatPressStart)
+		{
+			// A new press. The click itself already changed the size once.
+			repeatPressStart = pressStart;
+			nextRepeatAt = pressStart + HOLD_DELAY_MS;
+			repeatInterval = HOLD_FIRST_INTERVAL_MS;
+		}
+
+		long now = System.currentTimeMillis();
+		// The repeat stops while the mouse is off the button, and starts again when it comes back.
+		if (now < nextRepeatAt || !toolbarButtonClickbox(held).contains(mx, my))
+		{
+			return;
+		}
+		changeStrokeSize(held == SIZE_BUTTONS_START ? -1 : 1);
+		repeatInterval = Math.max(HOLD_MIN_INTERVAL_MS, repeatInterval * 9 / 10);
+		nextRepeatAt = now + repeatInterval;
+	}
 
 	private Color selectedColor()
 	{
@@ -119,7 +228,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 
 		if (!drawing)
 		{
-			currentStroke = null;
+			finishStroke();
 		}
 
 		boolean showUi = eraseMode || drawMode || drawing || erasing;
@@ -159,20 +268,20 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 					y3 = poly.ypoints[3];
 
 				pf sub = getBarycentre(mx, my, x0, y0, x1, y1, x2, y2, x3, y3);
-				ground = projectToScreen(sub.x, sub.y, x0, y0, x1, y1, x2, y2, x3, y3);
+				ground = projectToScreen(sub.x, sub.y, poly);
 
 				if (drawing) {
+					StrokePoint point = new StrokePoint(tilex, tiley, sub.x, sub.y);
 					if (currentStroke == null) {
 						currentStroke = new Stroke();
 						currentStroke.color = selectedColor();
-						currentStroke.strokeWidth = 1.0f;
+						currentStroke.strokeWidth = strokeSize;
 						strokesByRegion.computeIfAbsent(new WorldPoint(tilex, tiley, 0).getRegionID(), k -> new ArrayList<>()).add(currentStroke);
-					}
-					StrokePoint point = new StrokePoint(tilex, tiley, sub.x, sub.y);
-					List<StrokePoint> pts = currentStroke.pts;
-					if (pts.isEmpty() || !pts.get(pts.size() - 1).equals(point)) {
-						pts.add(point);
-						partySync.onPointAdded(currentStroke, point);
+						addPoint(point);
+					} else if (isFarFromLastPoint(ground)) {
+						addPoint(point);
+					} else {
+						skippedPoint = point;
 					}
 				}
 			}
@@ -187,7 +296,12 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 					graphics.draw(new Ellipse2D.Float(mx - 10, my - 10, 20, 20));
 				} else if ((drawMode || drawing) && ground != null) {
 					graphics.setColor(selectedColor());
-					graphics.drawRect((int) ground.x - 1, (int) ground.y - 1, 2, 2);
+					if (strokeSize <= 2) {
+						graphics.drawRect((int) ground.x - 1, (int) ground.y - 1, 2, 2);
+					} else {
+						// A circle with the size of the brush.
+						graphics.draw(new Ellipse2D.Float(ground.x - strokeSize / 2f, ground.y - strokeSize / 2f, strokeSize, strokeSize));
+					}
 				}
 			}
 
@@ -233,6 +347,44 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		for (int i = 0; i < COLOR_SLOTS; i++) {
 			buttons.add(new ColorToolbarButton(i));
 		}
+		// Decrease stroke size: a minus sign.
+		buttons.add(new ToolbarButton() {
+			@Override public void draw(Graphics2D g, Rectangle r, boolean mouseOver) {
+				g.setColor(strokeSize > Stroke.MIN_WIDTH ? Color.LIGHT_GRAY : Color.DARK_GRAY);
+				g.drawLine(r.x + 3, r.y + r.height / 2, r.x + r.width - 3, r.y + r.height / 2);
+				super.draw(g, r, mouseOver);
+			}
+			@Override public void addMenuEntries() {
+				client.getMenu().createMenuEntry(-1).setOption("Decrease by 10").setTarget("stroke size").onClick(me -> changeStrokeSize(-10));
+				client.getMenu().createMenuEntry(-1).setOption("Decrease").setTarget("stroke size").onClick(me -> changeStrokeSize(-1));
+			}
+		});
+		// Increase stroke size: a plus sign.
+		buttons.add(new ToolbarButton() {
+			@Override public void draw(Graphics2D g, Rectangle r, boolean mouseOver) {
+				g.setColor(strokeSize < Stroke.MAX_WIDTH ? Color.LIGHT_GRAY : Color.DARK_GRAY);
+				g.drawLine(r.x + r.width / 2, r.y + 3, r.x + r.width / 2, r.y + r.height - 3);
+				g.drawLine(r.x + 3, r.y + r.height / 2, r.x + r.width - 3, r.y + r.height / 2);
+				super.draw(g, r, mouseOver);
+			}
+			@Override public void addMenuEntries() {
+				client.getMenu().createMenuEntry(-1).setOption("Increase by 10").setTarget("stroke size").onClick(me -> changeStrokeSize(10));
+				client.getMenu().createMenuEntry(-1).setOption("Increase").setTarget("stroke size").onClick(me -> changeStrokeSize(1));
+			}
+		});
+		// The current stroke size, as a number.
+		buttons.add(new ToolbarButton() {
+			@Override public void draw(Graphics2D g, Rectangle r, boolean mouseOver) {
+				String text = Integer.toString(strokeSize);
+				FontMetrics metrics = g.getFontMetrics();
+				int textX = r.x + (r.width - metrics.stringWidth(text)) / 2;
+				int textY = r.y + (r.height - metrics.getHeight()) / 2 + metrics.getAscent();
+				g.setColor(Color.LIGHT_GRAY);
+				g.drawString(text, textX, textY);
+				g.setColor(Color.GRAY);
+				g.draw(r);
+			}
+		});
 	}
 
 	class ToolbarButton {
@@ -310,6 +462,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		if (!drawMode && !eraseMode && !drawing && !erasing || client.isMenuOpen()) return;
 
 		Point mouse = client.getMouseCanvasPosition();
+		repeatHeldSizeButton(mouse.getX(), mouse.getY());
 		int button = getMousedOverToolbarButton(mouse.getX(), mouse.getY());
 		if (button != -1) {
 			client.getMenu().setMenuEntries(Arrays.stream(client.getMenu().getMenuEntries()).filter(me -> me.getType() == MenuAction.CANCEL).toArray(MenuEntry[]::new));
@@ -324,22 +477,22 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		}
 	}
 
-	private pf projectToScreen(float subx, float suby, int x0, int y0, int x1, int y1, int x2, int y2, int x3, int y3)
+	/** Returns the screen position of a sub-tile position, with sub-pixel precision. */
+	private static pf projectToScreen(float subx, float suby, Polygon poly)
 	{
-		float screenx, screeny;
+		int[] xs = poly.xpoints;
+		int[] ys = poly.ypoints;
 		if (subx + suby <= 1)
 		{
-			screenx = (int) (x0 + (x1 - x0) * subx + (x3 - x0) * suby);
-			screeny = (int) (y0 + (y1 - y0) * subx + (y3 - y0) * suby);
+			return pf(
+				xs[0] + (xs[1] - xs[0]) * subx + (xs[3] - xs[0]) * suby,
+				ys[0] + (ys[1] - ys[0]) * subx + (ys[3] - ys[0]) * suby);
 		}
-		else
-		{
-			subx = 1 - subx;
-			suby = 1 - suby;
-			screenx = (int) (x2 + (x3 - x2) * subx + (x1 - x2) * suby);
-			screeny = (int) (y2 + (y3 - y2) * subx + (y1 - y2) * suby);
-		}
-		return pf(screenx, screeny);
+		subx = 1 - subx;
+		suby = 1 - suby;
+		return pf(
+			xs[2] + (xs[3] - xs[2]) * subx + (xs[1] - xs[2]) * suby,
+			ys[2] + (ys[3] - ys[2]) * subx + (ys[1] - ys[2]) * suby);
 	}
 
 	private pf getBarycentre(int mx, int my, int x0, int y0, int x1, int y1, int x2, int y2, int x3, int y3)
@@ -369,6 +522,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 	public void clearCanvas()
 	{
 		currentStroke = null;
+		skippedPoint = null;
 		strokesByRegion.clear();
 		partySync.onCanvasCleared();
 	}
@@ -417,6 +571,40 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 			return;
 		}
 
+		// Turn on antialiasing only for the strokes, and restore the old state, so the toolbar stays sharp.
+		Object oldAntialiasing = graphics.getRenderingHint(RenderingHints.KEY_ANTIALIASING);
+		Object oldStrokeControl = graphics.getRenderingHint(RenderingHints.KEY_STROKE_CONTROL);
+		java.awt.Stroke oldStroke = graphics.getStroke();
+		try
+		{
+			if (config.antialiasing())
+			{
+				graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+				// Keep the float positions. The default moves line ends to pixel centers.
+				graphics.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+			}
+			else
+			{
+				graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
+			}
+			drawStrokes(graphics, worldView, regions, mx, my, config.lineStyle());
+		}
+		finally
+		{
+			if (oldAntialiasing != null)
+			{
+				graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, oldAntialiasing);
+			}
+			if (oldStrokeControl != null)
+			{
+				graphics.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, oldStrokeControl);
+			}
+			graphics.setStroke(oldStroke);
+		}
+	}
+
+	private void drawStrokes(Graphics2D graphics, WorldView worldView, int[] regions, int mx, int my, LineStyle style)
+	{
 		pf eraseAt = erasing ? pf(mx, my) : null;
 		for (int region : regions)
 		{
@@ -433,7 +621,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 				{
 					continue;
 				}
-				if (drawStroke(graphics, worldView, s, eraseAt))
+				if (drawStroke(graphics, worldView, s, eraseAt, style))
 				{
 					if (toErase == null)
 					{
@@ -449,27 +637,100 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 			}
 		}
 
-		partySync.forEachVisibleStroke(regions, s -> drawStroke(graphics, worldView, s, null));
+		partySync.forEachVisibleStroke(regions, s -> drawStroke(graphics, worldView, s, null, style));
 	}
 
-	private BasicStroke basicStroke = new BasicStroke(1f);
+	private BasicStroke basicStroke = newBasicStroke(1f);
+
+	private static BasicStroke newBasicStroke(float width)
+	{
+		return new BasicStroke(width, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
+	}
 
 	private BasicStroke basicStroke(double width)
 	{
 		if (basicStroke.getLineWidth() != (float) width)
 		{
-			basicStroke = new BasicStroke((float) width);
+			basicStroke = newBasicStroke((float) width);
 		}
 		return basicStroke;
 	}
 
+	// Reused for each stroke, so drawing does not make new objects on each frame.
+	private final Path2D.Float path = new Path2D.Float();
+	// The screen positions of a run: points in a row that are all on the screen.
+	private float[] runX = new float[64];
+	private float[] runY = new float[64];
+	private int runLength = 0;
+
+	private void addToRun(float x, float y)
+	{
+		if (runLength == runX.length)
+		{
+			runX = Arrays.copyOf(runX, runLength * 2);
+			runY = Arrays.copyOf(runY, runLength * 2);
+		}
+		runX[runLength] = x;
+		runY[runLength] = y;
+		runLength++;
+	}
+
+	/** Adds the run to the path with the line style, then empties the run. */
+	private void endRun(LineStyle style)
+	{
+		int n = runLength;
+		runLength = 0;
+		if (n == 0)
+		{
+			return;
+		}
+
+		float[] x = runX;
+		float[] y = runY;
+		path.moveTo(x[0], y[0]);
+		if (n == 1)
+		{
+			// A very short line with round caps draws a dot with the width of the stroke.
+			path.lineTo(x[0] + 0.01f, y[0]);
+		}
+		else if (n == 2 || style == LineStyle.STRAIGHT)
+		{
+			for (int i = 1; i < n; i++)
+			{
+				path.lineTo(x[i], y[i]);
+			}
+		}
+		else if (style == LineStyle.SMOOTH)
+		{
+			// Each point is the control point of a quadratic curve between the midpoints of its two segments.
+			path.lineTo((x[0] + x[1]) / 2, (y[0] + y[1]) / 2);
+			for (int i = 1; i < n - 1; i++)
+			{
+				path.quadTo(x[i], y[i], (x[i] + x[i + 1]) / 2, (y[i] + y[i + 1]) / 2);
+			}
+			path.lineTo(x[n - 1], y[n - 1]);
+		}
+		else
+		{
+			// A Catmull-Rom spline, as cubic Bezier curves. The first and last points are used again as their own neighbors.
+			for (int i = 0; i < n - 1; i++)
+			{
+				int prev = Math.max(i - 1, 0);
+				int next = Math.min(i + 2, n - 1);
+				path.curveTo(
+					x[i] + (x[i + 1] - x[prev]) / 6, y[i] + (y[i + 1] - y[prev]) / 6,
+					x[i + 1] - (x[next] - x[i]) / 6, y[i + 1] - (y[next] - y[i]) / 6,
+					x[i + 1], y[i + 1]);
+			}
+		}
+	}
+
 	/** Draws one stroke. If eraseAt is not null, returns true when the stroke is near that point. */
-	private boolean drawStroke(Graphics2D graphics, WorldView worldView, Stroke s, pf eraseAt)
+	private boolean drawStroke(Graphics2D graphics, WorldView worldView, Stroke s, pf eraseAt, LineStyle style)
 	{
 		boolean hit = false;
-		graphics.setColor(s.color);
-		graphics.setStroke(basicStroke(s.strokeWidth));
-		int lastx = -1, lasty = -1;
+		path.reset();
+		runLength = 0;
 
 		// Consecutive points are often on the same tile, so project each tile once.
 		int tileX = Integer.MIN_VALUE, tileY = Integer.MIN_VALUE;
@@ -492,31 +753,24 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 			}
 			if (poly == null)
 			{
-				lastx = lasty = -1;
+				// The tile is not on the screen, so the line breaks here.
+				endRun(style);
 				continue;
 			}
-			int
-				x0 = poly.xpoints[0],
-				y0 = poly.ypoints[0],
-				x1 = poly.xpoints[1],
-				y1 = poly.ypoints[1],
-				x2 = poly.xpoints[2],
-				y2 = poly.ypoints[2],
-				x3 = poly.xpoints[3],
-				y3 = poly.ypoints[3];
-			pf screen = projectToScreen(p.getSubx(), p.getSuby(), x0, y0, x1, y1, x2, y2, x3, y3);
-			int screenx = (int) screen.x, screeny = (int) screen.y;
-			if (lastx != -1)
+			pf screen = projectToScreen(p.getSubx(), p.getSuby(), poly);
+			// The eraser has a radius of 10 pixels, so it hits a wide stroke at its edge.
+			if (eraseAt != null && !hit && runLength > 0
+				&& Line2D.ptSegDist(runX[runLength - 1], runY[runLength - 1], screen.x, screen.y, eraseAt.x, eraseAt.y) < 10 + s.strokeWidth / 2)
 			{
-				if (eraseAt != null && !hit && Line2D.ptSegDist(lastx, lasty, screenx, screeny, eraseAt.x, eraseAt.y) < 10)
-				{
-					hit = true;
-				}
-				graphics.drawLine(lastx, lasty, screenx, screeny);
+				hit = true;
 			}
-			lastx = screenx;
-			lasty = screeny;
+			addToRun(screen.x, screen.y);
 		}
+		endRun(style);
+
+		graphics.setColor(s.color);
+		graphics.setStroke(basicStroke(s.strokeWidth));
+		graphics.draw(path);
 		return hit;
 	}
 
@@ -527,16 +781,25 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 	}
 
 	// "New color" and "Reset palette" make the top row. The color slots go below them.
+	// Under the color slots, "Decrease" and "Increase" stroke size make one row, and the size number is under them.
 	private static final int TOP_ROW_BUTTONS = 2;
+	private static final int SIZE_BUTTONS_START = TOP_ROW_BUTTONS + COLOR_SLOTS;
+	private static final int SIZE_ROW = SLOTS_PER_COLUMN + 1;
 
 	private Rectangle toolbarButtonClickbox(int i) {
 		int column, row;
 		if (i < TOP_ROW_BUTTONS) {
 			column = i;
 			row = 0;
-		} else {
+		} else if (i < SIZE_BUTTONS_START) {
 			column = (i - TOP_ROW_BUTTONS) / SLOTS_PER_COLUMN;
 			row = (i - TOP_ROW_BUTTONS) % SLOTS_PER_COLUMN + 1;
+		} else if (i < SIZE_BUTTONS_START + 2) {
+			column = i - SIZE_BUTTONS_START;
+			row = SIZE_ROW;
+		} else {
+			// The size number is as wide as the two buttons above it.
+			return new Rectangle(2, 40 + 20 * (SIZE_ROW + 1), 36, 16);
 		}
 		return new Rectangle(2 + 20 * column, 40 + 20 * row, 16, 16);
 	}
@@ -566,6 +829,11 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 
 		toolbarButtonBeingDraggedIndex = getMousedOverToolbarButton(e.getX(), e.getY());
 		if (toolbarButtonBeingDraggedIndex != -1) {
+			if (isSizeButton(toolbarButtonBeingDraggedIndex)) {
+				// Write the time first. The client thread reads the button first, then the time.
+				heldSince = System.currentTimeMillis();
+				heldSizeButton = toolbarButtonBeingDraggedIndex;
+			}
 			return e;
 		}
 
@@ -589,6 +857,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 
 		drawing = false;
 		erasing = false;
+		heldSizeButton = -1;
 		return e;
 	}
 
@@ -623,6 +892,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		if (!e.isFocused()) {
 			drawing = false;
 			erasing = false;
+			heldSizeButton = -1;
 		}
 	}
 
@@ -634,6 +904,9 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 
 	public void startUp() {
 		showOwnStrokes = true;
+
+		Integer savedSize = configManager.getConfiguration(RsPaintExtendedConfig.GROUP, "strokeSize", Integer.class);
+		strokeSize = savedSize != null ? Math.max(Stroke.MIN_WIDTH, Math.min(Stroke.MAX_WIDTH, savedSize)) : Stroke.MIN_WIDTH;
 
 		String configuration = configManager.getConfiguration(RsPaintExtendedConfig.GROUP, "drawColors");
 		List<Color> saved = configuration != null ? gson.fromJson(configuration, COLOR_LIST_TYPE) : null;
@@ -668,6 +941,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 
 	static float triangleArea(int x1, int y1, int x2, int y2, int x3, int y3)
 	{
-		return Math.abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2);
+		// Divide as a float. An integer division drops the half-pixel areas.
+		return Math.abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2f);
 	}
 }

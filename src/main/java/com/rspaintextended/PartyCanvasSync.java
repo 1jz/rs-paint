@@ -486,7 +486,8 @@ public class PartyCanvasSync
 			Stroke stroke = new Stroke();
 			stroke.id = synced.getId();
 			stroke.color = new Color(synced.getColor(), true);
-			stroke.strokeWidth = synced.getStrokeWidth();
+			// Do not trust the width from the message. A very large width is slow to draw.
+			stroke.strokeWidth = Stroke.validWidth(synced.getStrokeWidth());
 			stroke.pts.addAll(synced.getPoints());
 
 			strokesById.put(stroke.id, stroke);
