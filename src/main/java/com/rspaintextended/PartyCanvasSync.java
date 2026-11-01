@@ -34,14 +34,19 @@ import net.runelite.client.party.messages.UserSync;
 public class PartyCanvasSync
 {
 	private static final long FLUSH_INTERVAL_MS = 200;
-	private static final int MAX_POINTS_PER_MESSAGE = 1000;
+
+	// Payload of one stroke in a message, measured with Gson: about 76 bytes for the stroke and 2.7 bytes for each point.
+	// StrokeCodec encodes the points. As plain JSON objects, each point was about 55 bytes.
+	private static final int STROKE_BYTES = 80;
+	private static final int POINT_BYTES = 3;
+	// Complete strokes go out in messages of at most about this many bytes.
+	private static final int MAX_MESSAGE_BYTES = 32 * 1024;
 
 	// A full sync sends only the newest strokes, so that a big canvas does not flood the party.
 	// Older strokes stay on your screen, but party members lose them on the next full sync.
-	// Payload, measured with Gson: about 55 bytes for each point and 113 bytes for each stroke, as JSON.
-	// A stroke gets at most one point each frame, so a line drawn in 1 second has about 50 points.
-	// At 50 points for each stroke, 1000 strokes are about 2.9 MB in about 50 messages, all sent in one flush.
-	// At 200 points for each stroke, they are about 11 MB in about 200 messages.
+	// A stroke gets at most one point each frame, so a line drawn in 1 second at 50 FPS has about 50 points.
+	// At 50 points for each stroke, 1000 strokes are about 210 KB in about 7 messages, all sent in one flush.
+	// At 200 points for each stroke, they are about 610 KB in about 19 messages.
 	private static final int MAX_SYNCED_STROKES = 1000;
 
 	@Inject private ClientThread clientThread;
@@ -298,13 +303,13 @@ public class PartyCanvasSync
 	}
 
 	/**
-	 * Sends the complete strokes in chunks of at most MAX_POINTS_PER_MESSAGE points.
+	 * Sends the complete strokes in chunks of about MAX_MESSAGE_BYTES at most. A stroke larger than that goes in a chunk alone.
 	 * If reset is true, the first chunk resets the receiver's canvas. Without a reset, each stroke replaces the receiver's copy.
 	 */
 	private void sendCompleteStrokes(List<Stroke> strokes, boolean reset)
 	{
 		List<SyncedStroke> chunk = new ArrayList<>();
-		int chunkPoints = 0;
+		int chunkBytes = 0;
 		for (Stroke stroke : strokes)
 		{
 			if (stroke.pts.isEmpty())
@@ -314,15 +319,16 @@ public class PartyCanvasSync
 
 			pendingPoints.remove(stroke);
 
-			if (!chunk.isEmpty() && chunkPoints + stroke.pts.size() > MAX_POINTS_PER_MESSAGE)
+			int strokeBytes = STROKE_BYTES + POINT_BYTES * stroke.pts.size();
+			if (!chunk.isEmpty() && chunkBytes + strokeBytes > MAX_MESSAGE_BYTES)
 			{
 				send(new RsPaintCanvasSync(reset, chunk));
 				reset = false;
 				chunk = new ArrayList<>();
-				chunkPoints = 0;
+				chunkBytes = 0;
 			}
 			chunk.add(toSynced(stroke, stroke.pts));
-			chunkPoints += stroke.pts.size();
+			chunkBytes += strokeBytes;
 		}
 
 		// A reset goes out even when empty, so receivers drop old strokes.

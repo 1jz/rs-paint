@@ -5,7 +5,7 @@ import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import javax.inject.Inject;
 import lombok.Value;
 import net.runelite.api.coords.WorldPoint;
@@ -102,7 +102,8 @@ public class RsPaintExtendedPlugin extends Plugin
 		/** From the stroke that draws first, at the bottom, to the stroke that draws last, on top. */
 		static final Comparator<Stroke> DRAW_ORDER = Comparator.comparingLong((Stroke s) -> s.order).thenComparing(s -> s.id);
 
-		String id = UUID.randomUUID().toString();
+		// A random 63-bit number in base 36. It is shorter than a UUID, and only one member's strokes must not collide.
+		String id = Long.toString(ThreadLocalRandom.current().nextLong() & Long.MAX_VALUE, Character.MAX_RADIX);
 		List<StrokePoint> pts = new ArrayList<>();
 		Color color;
 		double strokeWidth;
