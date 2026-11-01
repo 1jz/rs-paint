@@ -170,6 +170,9 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 	// Multiplies the stored width of each stroke to get its width on the screen. Set at the start of each frame.
 	private float widthScale = 1f;
 
+	// If false, strokes are drawn fully opaque, also when their color is transparent. Set at the start of each frame.
+	private boolean transparentStrokes = true;
+
 	/** Returns the width on the screen of a stroke with this stored width. It is never less than 1 pixel. */
 	private float screenWidth(double width)
 	{
@@ -457,8 +460,9 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		Color color = colors.get(index == -1 ? selectedColor : index);
 		SwingUtilities.invokeLater(() ->
 		{
+			// The picker shows the opacity of the color too. Strokes keep the opacity of their color.
 			RuneliteColorPicker colorPicker = colorPickerManager.create(client,
-				color != null ? color : Color.WHITE, "Paint color", true);
+				color != null ? color : Color.WHITE, "Paint color", false);
 			colorPicker.setOnClose(c -> {
 				if (index == -1) {
 					for (int i = colors.size() - 1; i > 0; i--) {
@@ -603,10 +607,12 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		Composite oldComposite = graphics.getComposite();
 		try
 		{
-			if (config.transparentStrokes())
+			// Each stroke is one path that is drawn one time, so the parts of a stroke that cross do not get darker.
+			// Each new stroke is drawn over the older strokes, so the colors of different strokes mix.
+			// This is true for the opacity of the stroke color and for the opacity of all strokes.
+			transparentStrokes = config.transparentStrokes();
+			if (transparentStrokes)
 			{
-				// Each stroke is one path that is drawn one time, so the parts of a stroke that cross do not get darker.
-				// Each new stroke is drawn over the older strokes, so the colors of different strokes mix.
 				float opacity = Math.max(0f, Math.min(1f, config.strokeOpacity() / 100f));
 				graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, opacity));
 			}
@@ -800,7 +806,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 	private void drawStroke(Graphics2D graphics, WorldView worldView, Stroke s, LineStyle style)
 	{
 		buildPath(worldView, s, null, style);
-		graphics.setColor(s.color);
+		graphics.setColor(transparentStrokes || s.color.getAlpha() == 255 ? s.color : new Color(s.color.getRGB(), false));
 		graphics.setStroke(basicStroke(screenWidth(s.strokeWidth)));
 		graphics.draw(path);
 	}

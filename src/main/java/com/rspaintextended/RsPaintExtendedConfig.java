@@ -69,7 +69,7 @@ public interface RsPaintExtendedConfig extends Config
 	@ConfigItem(
 		keyName = "transparentStrokes",
 		name = "Transparent strokes",
-		description = "Lets the game show through strokes. Where a stroke crosses itself, it does not get darker. Where a stroke crosses an older stroke, the colors mix.",
+		description = "Lets the game show through strokes that have a transparent color, and through all strokes if Stroke opacity is less than 100%. Where a stroke crosses itself, it does not get darker. Where a stroke crosses an older stroke, the colors mix. If this is off, all strokes are opaque.",
 		section = renderingSection,
 		position = 2
 	)
@@ -83,13 +83,13 @@ public interface RsPaintExtendedConfig extends Config
 	@ConfigItem(
 		keyName = "strokeOpacity",
 		name = "Stroke opacity",
-		description = "How much a stroke hides the game under it, if Transparent strokes is on. At 100%, the stroke hides the game fully.",
+		description = "Changes the opacity of all strokes, if Transparent strokes is on. It multiplies the opacity of each stroke color. At 100%, each stroke keeps the opacity of its color.",
 		section = renderingSection,
 		position = 3
 	)
 	default int strokeOpacity()
 	{
-		return 75;
+		return 100;
 	}
 
 	@ConfigItem(
