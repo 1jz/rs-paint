@@ -16,7 +16,7 @@ If you log out or change worlds, your drawings stay. If you close the client, yo
 ## Party drawings
 If you are in a party, your party members see your drawings while you draw. You see their drawings too. Each member has a separate canvas, and you can erase only your own strokes. To join a party, use the Party plugin.
 
-When a member joins the party, they get all of your drawings.
+When a member joins the party, all members get your newest 1000 strokes again. Your older strokes stay on your screen, but your party members do not see them after that.
 
 To open the RsPaint Extended panel, click the paintbrush icon in the side bar. The panel shows you and each party member.
 

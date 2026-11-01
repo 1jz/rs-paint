@@ -36,6 +36,14 @@ public class PartyCanvasSync
 	private static final long FLUSH_INTERVAL_MS = 200;
 	private static final int MAX_POINTS_PER_MESSAGE = 1000;
 
+	// A full sync sends only the newest strokes, so that a big canvas does not flood the party.
+	// Older strokes stay on your screen, but party members lose them on the next full sync.
+	// Payload, measured with Gson: about 55 bytes for each point and 113 bytes for each stroke, as JSON.
+	// A stroke gets at most one point each frame, so a line drawn in 1 second has about 50 points.
+	// At 50 points for each stroke, 1000 strokes are about 2.9 MB in about 50 messages, all sent in one flush.
+	// At 200 points for each stroke, they are about 11 MB in about 200 messages.
+	private static final int MAX_SYNCED_STROKES = 1000;
+
 	@Inject private ClientThread clientThread;
 	@Inject private PartyService partyService;
 	@Inject private WSClient wsClient;
@@ -262,7 +270,9 @@ public class PartyCanvasSync
 			localStrokesByRegion.values().forEach(strokes::addAll);
 			// Receivers sort by the order in each stroke. Old versions of the plugin use the message order.
 			strokes.sort(Stroke.DRAW_ORDER);
-			sendCompleteStrokes(strokes, true);
+			// The newest strokes are at the end of the list.
+			int skipped = Math.max(0, strokes.size() - MAX_SYNCED_STROKES);
+			sendCompleteStrokes(strokes.subList(skipped, strokes.size()), true);
 		}
 
 		// After the full sync, so that its reset does not remove these strokes again.
