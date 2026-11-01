@@ -46,6 +46,7 @@ public class RsPaintExtendedPlugin extends Plugin
 		mouseManager.registerMouseListener(overlay);
 		keyManager.registerKeyListener(overlay.drawHotkey);
 		keyManager.registerKeyListener(overlay.eraseHotkey);
+		keyManager.registerKeyListener(overlay.undoRedoKeys);
 		eventBus.register(overlay);
 
 		partySync.startUp();
@@ -69,6 +70,7 @@ public class RsPaintExtendedPlugin extends Plugin
 		mouseManager.unregisterMouseListener(overlay);
 		keyManager.unregisterKeyListener(overlay.drawHotkey);
 		keyManager.unregisterKeyListener(overlay.eraseHotkey);
+		keyManager.unregisterKeyListener(overlay.undoRedoKeys);
 		eventBus.unregister(overlay);
 
 		eventBus.unregister(partySync);

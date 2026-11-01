@@ -5,6 +5,8 @@ To draw, press the draw key (default `ctrl-b`) to turn on draw mode. Then click 
 
 To erase, press the erase key (default `ctrl-e`) to turn on erase mode. Then click and drag the mouse over a line. To turn off erase mode, press the erase key again.
 
+To undo your last line or erase, press the undo key (default `ctrl-z`) while draw mode or erase mode is on. To redo it, press the redo key (default `ctrl-y`). One erase drag undoes as one change. Undo goes back 100 changes. If you are in a party, your party members see the undo and the redo too. Reset canvas deletes the undo history.
+
 Draw mode and erase mode cannot both be on. If you press the erase key in draw mode, erase mode replaces draw mode. The opposite is also true. While one of the modes is on, a left click draws or erases, and does not move your character.
 
 To change the color, use the color buttons on the left side of the screen. The buttons show only while draw mode or erase mode is on.

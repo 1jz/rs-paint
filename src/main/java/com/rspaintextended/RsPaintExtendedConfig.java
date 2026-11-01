@@ -35,6 +35,26 @@ public interface RsPaintExtendedConfig extends Config
 		return new Keybind(KeyEvent.VK_E, InputEvent.CTRL_DOWN_MASK);
 	}
 
+	@ConfigItem(
+		keyName = "undoKeybind",
+		name = "Undo keybind",
+		description = "In draw mode or erase mode, press this key to undo your last line or erase."
+	)
+	default Keybind undoKeybind()
+	{
+		return new Keybind(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK);
+	}
+
+	@ConfigItem(
+		keyName = "redoKeybind",
+		name = "Redo keybind",
+		description = "In draw mode or erase mode, press this key to redo the last change that you undid."
+	)
+	default Keybind redoKeybind()
+	{
+		return new Keybind(KeyEvent.VK_Y, InputEvent.CTRL_DOWN_MASK);
+	}
+
 	@ConfigSection(
 		name = "Rendering",
 		description = "These settings change only how strokes look on your screen. They do not change the strokes that party members get.",

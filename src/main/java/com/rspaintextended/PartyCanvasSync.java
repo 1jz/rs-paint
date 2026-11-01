@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -48,6 +49,8 @@ public class PartyCanvasSync
 	// Outgoing changes waiting for the next flush. Client thread only.
 	private final Map<Stroke, List<StrokePoint>> pendingPoints = new LinkedHashMap<>();
 	private final List<String> pendingErases = new ArrayList<>();
+	// Strokes that undo or redo put back. They go out complete and replace the receiver's copy.
+	private final Set<Stroke> pendingRestores = new LinkedHashSet<>();
 	private boolean fullSyncPending = false;
 	private boolean canvasRequestPending = false;
 	private long lastFlush = 0;
@@ -181,7 +184,24 @@ public class PartyCanvasSync
 		for (Stroke stroke : strokes)
 		{
 			pendingPoints.remove(stroke);
+			pendingRestores.remove(stroke);
 			pendingErases.add(stroke.id);
+		}
+	}
+
+	void onStrokesRestored(Collection<Stroke> strokes)
+	{
+		if (!partyService.isInParty())
+		{
+			return;
+		}
+
+		for (Stroke stroke : strokes)
+		{
+			// If the erase is not sent yet, receivers still have the stroke. A replace is correct in both cases.
+			pendingErases.remove(stroke.id);
+			pendingPoints.remove(stroke);
+			pendingRestores.add(stroke);
 		}
 	}
 
@@ -223,6 +243,7 @@ public class PartyCanvasSync
 		{
 			pendingPoints.clear();
 			pendingErases.clear();
+			pendingRestores.clear();
 		}
 	}
 
@@ -241,7 +262,13 @@ public class PartyCanvasSync
 			localStrokesByRegion.values().forEach(strokes::addAll);
 			// Receivers sort by the order in each stroke. Old versions of the plugin use the message order.
 			strokes.sort(Stroke.DRAW_ORDER);
-			sendFullSync(strokes);
+			sendCompleteStrokes(strokes, true);
+		}
+
+		// After the full sync, so that its reset does not remove these strokes again.
+		if (!pendingRestores.isEmpty())
+		{
+			sendCompleteStrokes(new ArrayList<>(pendingRestores), false);
 		}
 
 		if (!pendingPoints.isEmpty())
@@ -260,10 +287,12 @@ public class PartyCanvasSync
 		}
 	}
 
-	/** Sends the strokes in chunks of at most MAX_POINTS_PER_MESSAGE points. Only the first chunk resets. */
-	private void sendFullSync(List<Stroke> strokes)
+	/**
+	 * Sends the complete strokes in chunks of at most MAX_POINTS_PER_MESSAGE points.
+	 * If reset is true, the first chunk resets the receiver's canvas. Without a reset, each stroke replaces the receiver's copy.
+	 */
+	private void sendCompleteStrokes(List<Stroke> strokes, boolean reset)
 	{
-		boolean reset = true;
 		List<SyncedStroke> chunk = new ArrayList<>();
 		int chunkPoints = 0;
 		for (Stroke stroke : strokes)
@@ -319,6 +348,7 @@ public class PartyCanvasSync
 	{
 		pendingPoints.clear();
 		pendingErases.clear();
+		pendingRestores.clear();
 		fullSyncPending = false;
 		canvasRequestPending = false;
 	}

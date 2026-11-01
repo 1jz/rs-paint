@@ -14,14 +14,17 @@ import java.awt.Graphics2D;
 import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
 import java.lang.reflect.Type;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,8 +45,10 @@ import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.FocusChanged;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.input.KeyListener;
 import net.runelite.client.input.MouseListener;
 import net.runelite.client.ui.components.colorpicker.ColorPickerManager;
 import net.runelite.client.ui.components.colorpicker.RuneliteColorPicker;
@@ -57,6 +62,7 @@ import net.runelite.client.util.HotkeyListener;
 public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 {
 	@Inject Client client;
+	@Inject private ClientThread clientThread;
 	@Inject private RsPaintExtendedConfig config;
 	@Inject private ConfigManager configManager;
 	@Inject private Gson gson;
@@ -147,6 +153,117 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		}
 		currentStroke = null;
 		skippedPoint = null;
+	}
+
+	// The most changes that undo can go back.
+	private static final int MAX_UNDO = 100;
+
+	/** One draw or one erase drag of the local player. A draw has one stroke. An erase has all strokes that one drag erased. */
+	@RequiredArgsConstructor
+	private static class CanvasChange
+	{
+		final boolean drawn;
+		final List<Stroke> strokes;
+	}
+
+	// The newest change is first. Client thread only.
+	private final Deque<CanvasChange> undoStack = new ArrayDeque<>();
+	private final Deque<CanvasChange> redoStack = new ArrayDeque<>();
+	// The change of the erase drag in progress, so that one drag undoes as one change.
+	private CanvasChange currentErase = null;
+
+	private void addToHistory(CanvasChange change)
+	{
+		undoStack.push(change);
+		if (undoStack.size() > MAX_UNDO)
+		{
+			undoStack.removeLast();
+		}
+		redoStack.clear();
+	}
+
+	private void recordErase(List<Stroke> erased)
+	{
+		if (currentErase == null)
+		{
+			currentErase = new CanvasChange(false, new ArrayList<>());
+			addToHistory(currentErase);
+		}
+		currentErase.strokes.addAll(erased);
+	}
+
+	/** Undoes the newest draw or erase, and tells party members. Client thread only. */
+	void undo()
+	{
+		CanvasChange change = takeChange(undoStack);
+		if (change == null)
+		{
+			return;
+		}
+		if (change.drawn)
+		{
+			removeStrokes(change.strokes);
+		}
+		else
+		{
+			restoreStrokes(change.strokes);
+		}
+		redoStack.push(change);
+	}
+
+	/** Does the newest undone change again, and tells party members. Client thread only. */
+	void redo()
+	{
+		CanvasChange change = takeChange(redoStack);
+		if (change == null)
+		{
+			return;
+		}
+		if (change.drawn)
+		{
+			restoreStrokes(change.strokes);
+		}
+		else
+		{
+			removeStrokes(change.strokes);
+		}
+		undoStack.push(change);
+	}
+
+	/** Takes the newest change from the stack. Returns null if the stack is empty or a drag is in progress. */
+	private CanvasChange takeChange(Deque<CanvasChange> stack)
+	{
+		if (drawing || erasing)
+		{
+			return null;
+		}
+		// The mouse button can be up before the next frame ends the stroke.
+		finishStroke();
+		currentErase = null;
+		return stack.poll();
+	}
+
+	private void removeStrokes(List<Stroke> strokes)
+	{
+		for (Stroke stroke : strokes)
+		{
+			List<Stroke> regionStrokes = strokesByRegion.get(stroke.primaryRegion());
+			if (regionStrokes != null)
+			{
+				regionStrokes.remove(stroke);
+			}
+		}
+		partySync.onStrokesErased(strokes);
+	}
+
+	private void restoreStrokes(List<Stroke> strokes)
+	{
+		for (Stroke stroke : strokes)
+		{
+			// The stroke keeps its draw order, so it goes back to the same layer.
+			strokesByRegion.computeIfAbsent(stroke.primaryRegion(), k -> new ArrayList<>()).add(stroke);
+		}
+		partySync.onStrokesRestored(strokes);
 	}
 
 	/** Returns the screen position of the point with the current camera, or null if its tile is not on the screen. */
@@ -252,6 +369,10 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		{
 			finishStroke();
 		}
+		if (!erasing)
+		{
+			currentErase = null;
+		}
 
 		boolean showUi = eraseMode || drawMode || drawing || erasing;
 		boolean overUi = showUi && getMousedOverToolbarButton(mx, my) != -1;
@@ -300,6 +421,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 						currentStroke.strokeWidth = strokeSize;
 						currentStroke.order = clock.next();
 						strokesByRegion.computeIfAbsent(new WorldPoint(tilex, tiley, 0).getRegionID(), k -> new ArrayList<>()).add(currentStroke);
+						addToHistory(new CanvasChange(true, List.of(currentStroke)));
 						addPoint(point);
 					} else if (isFarFromLastPoint(ground)) {
 						addPoint(point);
@@ -549,6 +671,10 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		currentStroke = null;
 		skippedPoint = null;
 		strokesByRegion.clear();
+		// A reset cannot be undone, so the history goes too.
+		undoStack.clear();
+		redoStack.clear();
+		currentErase = null;
 		partySync.onCanvasCleared();
 	}
 
@@ -714,6 +840,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 			{
 				strokes.removeAll(toErase);
 				partySync.onStrokesErased(toErase);
+				recordErase(toErase);
 			}
 		}
 	}
@@ -961,6 +1088,50 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		public void hotkeyPressed()
 		{
 			setMode(false, !eraseMode);
+		}
+	};
+
+	// Undo and redo work only in draw mode or erase mode. In other modes the keys go to the game.
+	final KeyListener undoRedoKeys = new KeyListener()
+	{
+		private boolean consumeTyped = false;
+
+		@Override
+		public void keyPressed(KeyEvent e)
+		{
+			if (!drawMode && !eraseMode)
+			{
+				return;
+			}
+
+			if (config.undoKeybind().matches(e))
+			{
+				e.consume();
+				consumeTyped = true;
+				clientThread.invoke(RsPaintExtendedOverlay.this::undo);
+			}
+			else if (config.redoKeybind().matches(e))
+			{
+				e.consume();
+				consumeTyped = true;
+				clientThread.invoke(RsPaintExtendedOverlay.this::redo);
+			}
+		}
+
+		@Override
+		public void keyTyped(KeyEvent e)
+		{
+			// The key press also makes a typed character. It must not reach the game either.
+			if (consumeTyped)
+			{
+				consumeTyped = false;
+				e.consume();
+			}
+		}
+
+		@Override
+		public void keyReleased(KeyEvent e)
+		{
 		}
 	};
 
