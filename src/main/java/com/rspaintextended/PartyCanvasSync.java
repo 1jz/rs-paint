@@ -127,6 +127,41 @@ public class PartyCanvasSync
 		}
 	}
 
+	/** Returns a copy of the member's strokes. Client thread only. */
+	List<SyncedStroke> memberStrokes(long memberId)
+	{
+		List<SyncedStroke> result = new ArrayList<>();
+		MemberCanvas canvas = canvases.get(memberId);
+		if (canvas != null)
+		{
+			for (Stroke stroke : canvas.strokesById.values())
+			{
+				result.add(toSynced(stroke, stroke.pts));
+			}
+		}
+		return result;
+	}
+
+	/** Returns a copy of the strokes of all members that are not hidden. Client thread only. */
+	List<SyncedStroke> visibleMemberStrokes()
+	{
+		List<SyncedStroke> result = new ArrayList<>();
+		for (Long memberId : canvases.keySet())
+		{
+			if (!hiddenMembers.contains(memberId))
+			{
+				result.addAll(memberStrokes(memberId));
+			}
+		}
+		return result;
+	}
+
+	/** Sends the complete local canvas on the next flush. Client thread only. */
+	void requestFullSync()
+	{
+		fullSyncPending = true;
+	}
+
 	void onPointAdded(Stroke stroke, StrokePoint point)
 	{
 		if (partyService.isInParty())

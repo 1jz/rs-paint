@@ -9,7 +9,7 @@ Draw mode and erase mode cannot both be on. If you press the erase key in draw m
 
 To change the color, use the color buttons on the left side of the screen. The buttons show only while draw mode or erase mode is on.
 
-If you log out or change worlds, your drawings stay. If you close the client, your drawings are deleted.
+If you log out or change worlds, your drawings stay. If you close the client, your drawings are deleted. To keep them, export them to a file.
 
 ## Party drawings
 If you are in a party, your party members see your drawings while you draw. You see their drawings too. Each member has a separate canvas, and you can erase only your own strokes. To join a party, use the Party plugin.
@@ -20,3 +20,12 @@ To open the RsPaint Extended panel, click the paintbrush icon in the side bar. T
 
 - To hide or show the drawings of a player, click the switch next to the name.
 - To delete all of your drawings, click Reset canvas. This deletes all of your drawings, for you and for your party members. You cannot undo this.
+
+## Import and export drawings
+You can save drawings to a JSON file and load them again later. Use the RsPaint Extended panel.
+
+- To save the drawings of one player, click Export next to the name.
+- To save the drawings of all players whose switch is on, click Export shown drawings. All of the drawings go into one file.
+- To load drawings from a file, click Import drawings. The drawings are added to your own drawings. If you are in a party, your party members see them too.
+
+Imported drawings become your strokes, so you can erase them. Import does not delete the drawings that you already have.

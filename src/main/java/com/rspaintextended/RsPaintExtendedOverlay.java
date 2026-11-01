@@ -73,6 +73,22 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 
 	static final Color DEFAULT_COLOR = Color.LIGHT_GRAY;
 
+	// Two columns of color slots. The first column starts with the Paint palette.
+	static final int SLOTS_PER_COLUMN = 10;
+	static final int COLOR_SLOTS = SLOTS_PER_COLUMN * 2;
+	static final Color[] DEFAULT_PALETTE = {
+		new Color(0x000000), // black
+		new Color(0xFFFFFF), // white
+		new Color(0x7F7F7F), // gray
+		new Color(0xED1C24), // red
+		new Color(0xFF7F27), // orange
+		new Color(0xFFF200), // yellow
+		new Color(0x22B14C), // green
+		new Color(0x00A2E8), // turquoise
+		new Color(0x3F48CC), // indigo
+		new Color(0xA349A4), // purple
+	};
+
 	@Inject
 	public RsPaintExtendedOverlay()
 	{
@@ -199,7 +215,22 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 				client.getMenu().createMenuEntry(-1).setOption("New color").onClick(me -> pickColor(-1));
 			}
 		});
-		for (int i = 0; i < 10; i++) {
+		// Reset palette: a circular arrow.
+		buttons.add(new ToolbarButton() {
+			@Override public void draw(Graphics2D g, Rectangle r, boolean mouseOver) {
+				g.setColor(Color.LIGHT_GRAY);
+				int cx = r.x + r.width / 2;
+				int top = r.y + 3;
+				g.drawArc(r.x + 3, top, r.width - 6, r.height - 6, 90, -270);
+				g.drawLine(cx - 1, top, cx + 2, top - 2);
+				g.drawLine(cx - 1, top, cx + 2, top + 2);
+				super.draw(g, r, mouseOver);
+			}
+			@Override public void addMenuEntries() {
+				client.getMenu().createMenuEntry(-1).setOption("Reset").setTarget("palette").onClick(me -> useDefaultPalette());
+			}
+		});
+		for (int i = 0; i < COLOR_SLOTS; i++) {
 			buttons.add(new ColorToolbarButton(i));
 		}
 	}
@@ -257,7 +288,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 				color != null ? color : Color.WHITE, "Paint color", true);
 			colorPicker.setOnClose(c -> {
 				if (index == -1) {
-					for (int i = 9; i > 0; i--) {
+					for (int i = colors.size() - 1; i > 0; i--) {
 						colors.set(i, colors.get(i - 1));
 					}
 				}
@@ -340,6 +371,41 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		currentStroke = null;
 		strokesByRegion.clear();
 		partySync.onCanvasCleared();
+	}
+
+	/** Returns a copy of the local player's strokes. Client thread only. */
+	List<SyncedStroke> ownStrokes()
+	{
+		List<SyncedStroke> result = new ArrayList<>();
+		for (List<Stroke> strokes : strokesByRegion.values())
+		{
+			for (Stroke stroke : strokes)
+			{
+				if (!stroke.pts.isEmpty())
+				{
+					result.add(PartyCanvasSync.toSynced(stroke, stroke.pts));
+				}
+			}
+		}
+		return result;
+	}
+
+	/** Adds the strokes to the local player's canvas with new ids, and sends them to the party. Client thread only. */
+	void importStrokes(List<SyncedStroke> strokes)
+	{
+		for (SyncedStroke synced : strokes)
+		{
+			if (synced.getPoints() == null || synced.getPoints().isEmpty())
+			{
+				continue;
+			}
+			Stroke stroke = new Stroke();
+			stroke.color = new Color(synced.getColor(), true);
+			stroke.strokeWidth = synced.getStrokeWidth();
+			stroke.pts.addAll(synced.getPoints());
+			strokesByRegion.computeIfAbsent(stroke.primaryRegion(), k -> new ArrayList<>()).add(stroke);
+		}
+		partySync.requestFullSync();
 	}
 
 	private void drawStrokes(Graphics2D graphics, int mx, int my)
@@ -460,8 +526,19 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		return r;
 	}
 
+	// "New color" and "Reset palette" make the top row. The color slots go below them.
+	private static final int TOP_ROW_BUTTONS = 2;
+
 	private Rectangle toolbarButtonClickbox(int i) {
-		return new Rectangle(2, 40 + 20 * i, 16, 16);
+		int column, row;
+		if (i < TOP_ROW_BUTTONS) {
+			column = i;
+			row = 0;
+		} else {
+			column = (i - TOP_ROW_BUTTONS) / SLOTS_PER_COLUMN;
+			row = (i - TOP_ROW_BUTTONS) % SLOTS_PER_COLUMN + 1;
+		}
+		return new Rectangle(2 + 20 * column, 40 + 20 * row, 16, 16);
 	}
 
 	private int getMousedOverToolbarButton(int mx, int my) {
@@ -560,19 +637,33 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 
 		String configuration = configManager.getConfiguration(RsPaintExtendedConfig.GROUP, "drawColors");
 		List<Color> saved = configuration != null ? gson.fromJson(configuration, COLOR_LIST_TYPE) : null;
-		if (saved == null) {
-			colors = new ArrayList<>();
-			colors.add(DEFAULT_COLOR);
-			while (colors.size() < 10) {
-				colors.add(null);
-			}
-			saveColors();
+		if (saved == null || isOldDefaultPalette(saved)) {
+			useDefaultPalette();
 			return;
 		}
-		while (saved.size() < 10) {
+		while (saved.size() < COLOR_SLOTS) {
 			saved.add(null);
 		}
 		colors = saved;
+	}
+
+	private void useDefaultPalette() {
+		colors = new ArrayList<>(Arrays.asList(DEFAULT_PALETTE));
+		while (colors.size() < COLOR_SLOTS) {
+			colors.add(null);
+		}
+		saveColors();
+	}
+
+	/** True if the saved palette is the old one-color default, so the player never chose a color. */
+	private static boolean isOldDefaultPalette(List<Color> saved) {
+		for (int i = 0; i < saved.size(); i++) {
+			Color color = saved.get(i);
+			if (color != null && !(i == 0 && color.equals(DEFAULT_COLOR))) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	static float triangleArea(int x1, int y1, int x2, int y2, int x3, int y3)

@@ -4,6 +4,7 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.GridLayout;
 import java.awt.Insets;
@@ -11,11 +12,15 @@ import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import javax.swing.ImageIcon;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -27,11 +32,14 @@ import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import lombok.Value;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.Player;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.client.RuneLite;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.PartyChanged;
@@ -48,6 +56,7 @@ import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.SwingUtil;
 
 /** The side panel, styled after the Time Tracking plugin's panel. */
+@Slf4j
 @Singleton
 public class RsPaintExtendedPanel extends PluginPanel
 {
@@ -70,12 +79,15 @@ public class RsPaintExtendedPanel extends PluginPanel
 	@Inject private PartyService partyService;
 	@Inject private PartyCanvasSync partySync;
 	@Inject private RsPaintExtendedOverlay overlay;
+	@Inject private DrawingFiles drawingFiles;
 
 	private final JTextArea partyStatus = new WrappingTextArea();
 	private final JPanel memberList = new JPanel(new DynamicGridLayout(0, 1, 0, 0));
 
 	// Client thread only.
 	private List<MemberRow> shownRows = null;
+	// Swing thread only.
+	private File lastDirectory = null;
 
 	@Value
 	private static class MemberRow
@@ -232,6 +244,9 @@ public class RsPaintExtendedPanel extends PluginPanel
 		tile.add(text, BorderLayout.CENTER);
 		JPanel showWrapper = new JPanel(new GridBagLayout());
 		showWrapper.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		GridBagConstraints exportConstraints = new GridBagConstraints();
+		exportConstraints.insets = new Insets(0, 0, 0, 8);
+		showWrapper.add(createExportLink(row), exportConstraints);
 		showWrapper.add(show);
 		tile.add(showWrapper, BorderLayout.EAST);
 
@@ -242,10 +257,50 @@ public class RsPaintExtendedPanel extends PluginPanel
 		return container;
 	}
 
+	private JLabel createExportLink(MemberRow row)
+	{
+		JLabel link = new JLabel("Export");
+		link.setFont(FontManager.getRunescapeSmallFont());
+		link.setForeground(Color.GRAY);
+		link.setToolTipText(row.isLocal() ? "Save your drawings to a file." : "Save the drawings of " + row.getName() + " to a file.");
+		link.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				if (row.isLocal())
+				{
+					exportDrawings(row.getName(), overlay::ownStrokes);
+				}
+				else
+				{
+					exportDrawings(row.getName(), () -> partySync.memberStrokes(row.getMemberId()));
+				}
+			}
+
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				link.setForeground(Color.WHITE);
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				link.setForeground(Color.GRAY);
+			}
+		});
+		return link;
+	}
+
 	private JPanel createButtons()
 	{
 		JPanel buttons = new JPanel(new DynamicGridLayout(0, 1, 0, 0));
 		buttons.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		buttons.add(createButton("Import drawings",
+			"Add the drawings in a file to your drawings. Party members see them too.", this::importDrawings));
+		buttons.add(createButton("Export shown drawings",
+			"Save the drawings of all players whose switch is on to one file.", this::exportShownDrawings));
 		buttons.add(createButton("Reset canvas", "Delete all of your drawings.", this::confirmReset));
 		return buttons;
 	}
@@ -287,6 +342,118 @@ public class RsPaintExtendedPanel extends PluginPanel
 		container.setBorder(new EmptyBorder(10, 0, 0, 0));
 		container.add(button, BorderLayout.CENTER);
 		return container;
+	}
+
+	private void exportShownDrawings()
+	{
+		exportDrawings("party", () -> {
+			List<SyncedStroke> strokes = new ArrayList<>();
+			if (overlay.isShowOwnStrokes())
+			{
+				strokes.addAll(overlay.ownStrokes());
+			}
+			strokes.addAll(partySync.visibleMemberStrokes());
+			return strokes;
+		});
+	}
+
+	/** Collects the strokes on the client thread, then asks for a file on the Swing thread. */
+	private void exportDrawings(String name, Supplier<List<SyncedStroke>> collect)
+	{
+		clientThread.invokeLater(() -> {
+			List<SyncedStroke> strokes = collect.get();
+			SwingUtilities.invokeLater(() -> saveToFile(name, strokes));
+		});
+	}
+
+	private void saveToFile(String name, List<SyncedStroke> strokes)
+	{
+		if (strokes.isEmpty())
+		{
+			JOptionPane.showMessageDialog(this, "There are no drawings to export.",
+				"Export drawings", JOptionPane.INFORMATION_MESSAGE);
+			return;
+		}
+
+		JFileChooser chooser = createFileChooser("Export drawings");
+		chooser.setSelectedFile(new File(chooser.getCurrentDirectory(),
+			name.replaceAll("[^A-Za-z0-9 _-]", "_") + " drawings." + DrawingFiles.EXTENSION));
+		if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION)
+		{
+			return;
+		}
+
+		File file = chooser.getSelectedFile();
+		if (!file.getName().toLowerCase().endsWith("." + DrawingFiles.EXTENSION))
+		{
+			file = new File(file.getParentFile(), file.getName() + "." + DrawingFiles.EXTENSION);
+		}
+		lastDirectory = file.getParentFile();
+
+		if (file.exists() && JOptionPane.showConfirmDialog(this,
+			file.getName() + " already exists. Do you want to replace it?",
+			"Export drawings", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.OK_OPTION)
+		{
+			return;
+		}
+
+		try
+		{
+			drawingFiles.write(file, strokes);
+		}
+		catch (IOException e)
+		{
+			log.warn("Could not export drawings to {}", file, e);
+			JOptionPane.showMessageDialog(this, "Could not save the file: " + e.getMessage(),
+				"Export drawings", JOptionPane.ERROR_MESSAGE);
+		}
+	}
+
+	private void importDrawings()
+	{
+		JFileChooser chooser = createFileChooser("Import drawings");
+		if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION)
+		{
+			return;
+		}
+
+		File file = chooser.getSelectedFile();
+		lastDirectory = file.getParentFile();
+
+		List<SyncedStroke> strokes;
+		try
+		{
+			strokes = drawingFiles.read(file);
+		}
+		catch (IOException e)
+		{
+			log.warn("Could not import drawings from {}", file, e);
+			JOptionPane.showMessageDialog(this, "Could not read the file: " + e.getMessage(),
+				"Import drawings", JOptionPane.ERROR_MESSAGE);
+			return;
+		}
+
+		if (strokes.isEmpty())
+		{
+			JOptionPane.showMessageDialog(this, "The file has no drawings.",
+				"Import drawings", JOptionPane.INFORMATION_MESSAGE);
+			return;
+		}
+
+		clientThread.invokeLater(() -> overlay.importStrokes(strokes));
+		JOptionPane.showMessageDialog(this,
+			"Added " + strokes.size() + (strokes.size() == 1 ? " stroke" : " strokes") + " to your drawings."
+				+ (overlay.isShowOwnStrokes() ? "" : " Turn on your switch to see them."),
+			"Import drawings", JOptionPane.INFORMATION_MESSAGE);
+	}
+
+	private JFileChooser createFileChooser(String title)
+	{
+		JFileChooser chooser = new JFileChooser(lastDirectory != null ? lastDirectory : RuneLite.RUNELITE_DIR);
+		chooser.setDialogTitle(title);
+		chooser.setFileFilter(new FileNameExtensionFilter(
+			"Drawing files (*." + DrawingFiles.EXTENSION + ")", DrawingFiles.EXTENSION));
+		return chooser;
 	}
 
 	private void confirmReset()
