@@ -725,8 +725,8 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 	private void drawStrokes(Graphics2D graphics, int mx, int my)
 	{
 		WorldView worldView = client.getTopLevelWorldView();
-		int[] regions = worldView.getMapRegions();
-		if (regions == null)
+		int[] regions = sceneRegions(worldView);
+		if (regions.length == 0)
 		{
 			return;
 		}
@@ -772,6 +772,55 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 			graphics.setStroke(oldStroke);
 			graphics.setComposite(oldComposite);
 		}
+	}
+
+	// The ids of the regions in the scene, and the scene base and size they are for.
+	// Made again only when the scene moves, so drawing does not make a new array on each frame.
+	private int[] sceneRegions = new int[0];
+	private int sceneRegionsBaseX, sceneRegionsBaseY, sceneRegionsSizeX, sceneRegionsSizeY;
+
+	/**
+	 * Returns the ids of all regions that have tiles in the scene. Do not change the array.
+	 * A stroke is stored under the region of its world tile. Inside an instance, that is a region of the instance
+	 * coordinates, but getMapRegions() gives the template regions. So the ids come from the scene base and size.
+	 * Outside an instance, they are the same regions as getMapRegions() gives.
+	 */
+	private int[] sceneRegions(WorldView worldView)
+	{
+		int baseX = worldView.getBaseX();
+		int baseY = worldView.getBaseY();
+		int sizeX = worldView.getSizeX();
+		int sizeY = worldView.getSizeY();
+		if (baseX == sceneRegionsBaseX && baseY == sceneRegionsBaseY && sizeX == sceneRegionsSizeX && sizeY == sceneRegionsSizeY)
+		{
+			return sceneRegions;
+		}
+		sceneRegionsBaseX = baseX;
+		sceneRegionsBaseY = baseY;
+		sceneRegionsSizeX = sizeX;
+		sceneRegionsSizeY = sizeY;
+
+		if (sizeX <= 0 || sizeY <= 0)
+		{
+			sceneRegions = new int[0];
+			return sceneRegions;
+		}
+		// The same formula as WorldPoint.getRegionID(). A region is 64 by 64 tiles.
+		int minRegionX = baseX >> 6;
+		int maxRegionX = (baseX + sizeX - 1) >> 6;
+		int minRegionY = baseY >> 6;
+		int maxRegionY = (baseY + sizeY - 1) >> 6;
+		int[] regions = new int[(maxRegionX - minRegionX + 1) * (maxRegionY - minRegionY + 1)];
+		int i = 0;
+		for (int regionX = minRegionX; regionX <= maxRegionX; regionX++)
+		{
+			for (int regionY = minRegionY; regionY <= maxRegionY; regionY++)
+			{
+				regions[i++] = regionX << 8 | regionY;
+			}
+		}
+		sceneRegions = regions;
+		return regions;
 	}
 
 	// The strokes to draw in this frame. Reused, so drawing does not make a new list on each frame.
