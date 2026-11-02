@@ -440,17 +440,35 @@ public class PartyCanvasSync
 		});
 	}
 
+	/** Returns true if the local player sent the message. The party server sends each message back to its sender too. */
+	private boolean isFromLocalMember(PartyMemberMessage message)
+	{
+		PartyMember local = partyService.getLocalMember();
+		return local != null && local.getMemberId() == message.getMemberId();
+	}
+
+	// Our own request comes back too. startUp already queued our full sync, so ignore it.
 	@Subscribe
 	public void onRsPaintCanvasRequest(RsPaintCanvasRequest message)
 	{
-		clientThread.invokeLater(() -> fullSyncPending = true);
+		clientThread.invokeLater(() -> {
+			if (!isFromLocalMember(message))
+			{
+				fullSyncPending = true;
+			}
+		});
 	}
 
-	// A joining member sends UserSync.
+	// A joining member sends UserSync. Our own UserSync comes back too. onUserJoin already queued our full sync, so ignore it.
 	@Subscribe
 	public void onUserSync(UserSync message)
 	{
-		clientThread.invokeLater(() -> fullSyncPending = true);
+		clientThread.invokeLater(() -> {
+			if (!isFromLocalMember(message))
+			{
+				fullSyncPending = true;
+			}
+		});
 	}
 
 	@Subscribe
