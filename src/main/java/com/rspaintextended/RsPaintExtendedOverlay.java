@@ -1203,7 +1203,7 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		@Override
 		public void keyTyped(KeyEvent e)
 		{
-			// The key press also makes a typed character. It must not reach the game either.
+			// Most key presses also make a typed character. It must not reach the game either.
 			if (consumeTyped)
 			{
 				consumeTyped = false;
@@ -1214,6 +1214,16 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		@Override
 		public void keyReleased(KeyEvent e)
 		{
+			// Some keys, for example F5 or the arrow keys, make no typed character. If the flag stays on,
+			// keyTyped eats the next character that the player types. The typed character comes before the release.
+			consumeTyped = false;
+		}
+
+		// The key can be released outside the client.
+		@Override
+		public void focusLost()
+		{
+			consumeTyped = false;
 		}
 	};
 
