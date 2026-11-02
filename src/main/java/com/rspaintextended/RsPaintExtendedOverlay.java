@@ -154,7 +154,19 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 		if (currentStroke != null)
 		{
 			// The stroke is complete. Fewer points make full syncs, exports and drawing faster.
+			int oldRegion = currentStroke.primaryRegion();
 			currentStroke.pts = StrokeCodec.simplify(currentStroke.pts);
+			// Simplify rounds the points, so the first point can move onto a tile in the next region.
+			// Undo and redo find the stroke by its primary region, so it must be in the list of that region.
+			int newRegion = currentStroke.primaryRegion();
+			if (newRegion != oldRegion)
+			{
+				List<Stroke> oldStrokes = strokesByRegion.get(oldRegion);
+				if (oldStrokes != null && oldStrokes.remove(currentStroke))
+				{
+					strokesByRegion.computeIfAbsent(newRegion, k -> new ArrayList<>()).add(currentStroke);
+				}
+			}
 		}
 		currentStroke = null;
 		skippedPoint = null;
