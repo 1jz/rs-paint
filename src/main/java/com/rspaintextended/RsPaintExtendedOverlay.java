@@ -1037,14 +1037,27 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 	boolean erasing = false;
 	boolean drawable = false; // The last menu had a WALK entry.
 
+	/** True if the toolbar is on the screen. This is the same test that render() uses. */
+	private boolean isToolbarShown()
+	{
+		return eraseMode || drawMode || drawing || erasing;
+	}
+
 	int toolbarButtonBeingDraggedIndex = -1;
 
 	@Override
 	public MouseEvent mousePressed(MouseEvent e)
 	{
-		if (e.getButton() != MouseEvent.BUTTON1 || client.isMenuOpen()) return e;
+		if (e.getButton() != MouseEvent.BUTTON1) return e;
 
-		toolbarButtonBeingDraggedIndex = getMousedOverToolbarButton(e.getX(), e.getY());
+		// A press on an open menu picks a menu entry. It does not start a drag.
+		toolbarButtonBeingDraggedIndex = -1;
+		if (client.isMenuOpen()) return e;
+
+		// The hidden toolbar takes no clicks.
+		if (isToolbarShown()) {
+			toolbarButtonBeingDraggedIndex = getMousedOverToolbarButton(e.getX(), e.getY());
+		}
 		if (toolbarButtonBeingDraggedIndex != -1) {
 			if (isSizeButton(toolbarButtonBeingDraggedIndex)) {
 				// Write the time first. The client thread reads the button first, then the time.
@@ -1067,11 +1080,14 @@ public class RsPaintExtendedOverlay extends Overlay implements MouseListener
 	{
 		if (e.getButton() != MouseEvent.BUTTON1) return e;
 
-		int i = getMousedOverToolbarButton(e.getX(), e.getY());
+		// A release on an open menu or on the hidden toolbar does not drop on a button.
+		int i = !client.isMenuOpen() && isToolbarShown() ? getMousedOverToolbarButton(e.getX(), e.getY()) : -1;
 		if (i != -1 && toolbarButtonBeingDraggedIndex != -1) {
 			buttons.get(i).onDrag(buttons.get(toolbarButtonBeingDraggedIndex));
 		}
 
+		// Always end the drag and the held size button, also if a menu opened during the press.
+		toolbarButtonBeingDraggedIndex = -1;
 		drawing = false;
 		erasing = false;
 		heldSizeButton = -1;
