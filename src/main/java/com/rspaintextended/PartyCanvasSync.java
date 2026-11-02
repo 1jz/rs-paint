@@ -5,6 +5,7 @@ import com.rspaintextended.RsPaintExtendedPlugin.StrokePoint;
 import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -47,7 +48,13 @@ public class PartyCanvasSync
 	// A stroke gets at most one point each frame, so a line drawn in 1 second at 50 FPS has about 50 points.
 	// StrokeCodec.simplify keeps about 25 of them. Then 1000 strokes are about 150 KB in about 5 messages, all sent in one flush.
 	// A line of 200 points keeps about 100, and 1000 of those are about 390 KB in about 12 messages.
+	// A member canvas also keeps only this many strokes, the newest ones, so a member cannot fill your memory.
 	private static final int MAX_SYNCED_STROKES = 1000;
+	// A member canvas keeps at most this many points in each stroke, and drops the points after them.
+	// Members send the points of a stroke while it is drawn, before simplify. A stroke gets at most one point each frame,
+	// and only after the mouse moves 3 screen pixels. So 5000 points are a line of at least 15000 pixels, about 8 times
+	// across a 1920-pixel screen, and more than 1.5 minutes of drawing without a stop at 50 FPS. Real strokes are much shorter.
+	private static final int MAX_STROKE_POINTS = 5000;
 
 	@Inject private ClientThread clientThread;
 	@Inject private PartyService partyService;
@@ -514,7 +521,7 @@ public class PartyCanvasSync
 			}
 			else if (synced.getPoints() != null)
 			{
-				stroke.pts.addAll(synced.getPoints());
+				addPoints(stroke, synced.getPoints());
 			}
 		}
 
@@ -556,10 +563,33 @@ public class PartyCanvasSync
 			// Do not trust the width from the message. A very large width is slow to draw.
 			stroke.strokeWidth = Stroke.validWidth(synced.getStrokeWidth());
 			stroke.order = clock.receive(synced.getOrder());
-			stroke.pts.addAll(synced.getPoints());
+			addPoints(stroke, synced.getPoints());
+
+			// Keep the newest MAX_SYNCED_STROKES strokes in draw order, the same strokes as the member's full sync.
+			// A new stroke of the member is always the newest, so the oldest kept stroke goes. A stroke that is older
+			// than all kept strokes, for example an old stroke that undo puts back, is dropped. A full sync would drop it too.
+			if (strokesById.size() >= MAX_SYNCED_STROKES)
+			{
+				Stroke oldest = Collections.min(strokesById.values(), Stroke.DRAW_ORDER);
+				if (Stroke.DRAW_ORDER.compare(stroke, oldest) < 0)
+				{
+					return;
+				}
+				remove(oldest.id);
+			}
 
 			strokesById.put(stroke.id, stroke);
 			strokesByRegion.computeIfAbsent(stroke.primaryRegion(), k -> new ArrayList<>()).add(stroke);
+		}
+
+		/** Adds the points to the stroke, but not past MAX_STROKE_POINTS. */
+		private void addPoints(Stroke stroke, List<StrokePoint> points)
+		{
+			int room = MAX_STROKE_POINTS - stroke.pts.size();
+			if (room > 0)
+			{
+				stroke.pts.addAll(points.size() <= room ? points : points.subList(0, room));
+			}
 		}
 	}
 }
